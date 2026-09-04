@@ -6,6 +6,9 @@ matching the pushed tag as that GitHub release's notes, so add an entry here bef
 ## Unreleased
 
 - Forked from `kylemcd/obsidian-document-comments` at 0.1.15 as **Document Comments MV** (`mv-nick/obsidian-document-comments`). Renamed the plugin id to `document-comments-mv`, the sidebar view type, and the table-highlight registry names so the fork can neither be overwritten by nor collide with the upstream plugin. The comment format is unchanged.
+- Added a **Show highlights** setting and a **Toggle highlights** command. Highlights no longer follow the comment column, so you can hide the cards and keep the highlighted text, or the reverse. Vaults that already had comments hidden keep both hidden until you turn highlights back on. (Upstream PR #78.)
+- Added **Add comment** to the editor right-click menu when text is selected. If you previously added that command to the menu with the Commander plugin, remove your mapping to avoid a duplicate entry. (Upstream PR #78.)
+- Fixed the **Author** setting assigning a highlight color to every half-typed name. Typing `Alice` no longer leaves `A`, `Al`, `Ali`, and `Alic` behind in **Highlight colors**. (Upstream PR #78.)
 
 ## 0.1.15
 
