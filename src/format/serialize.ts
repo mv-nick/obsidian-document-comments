@@ -32,7 +32,14 @@ export const serializeBody = (id: string, data: CommentData): string => {
 		.filter((r) => r.authors.length > 0)
 		.map((r) => {
 			const target = r.entry !== undefined && r.entry > 0 ? `@${r.entry} ` : "";
-			return `+${target}${r.emoji} ${r.authors.map(escapeReactionAuthor).join(", ")}`;
+			// Reaction lines sit inside the block too: an author or emoji carrying a
+			// newline would forge an entry, and `-->` would end the block. Spelling is
+			// otherwise kept as-is (commas are escaped) so existing reactions round-trip.
+			const emoji = breakTerminator(r.emoji.replace(/\s+/g, ""));
+			const authors = r.authors.map((author) =>
+				escapeReactionAuthor(breakTerminator(author).replace(/[\r\n]+/g, " ")),
+			);
+			return `+${target}${emoji} ${authors.join(", ")}`;
 		});
 	const body = [...lines, ...reactionLines];
 	const block = body.length ? body.join("\n") + "\n" : "";
@@ -40,9 +47,12 @@ export const serializeBody = (id: string, data: CommentData): string => {
 };
 
 const serializeEntry = (e: ThreadEntry): string => {
-	const who = e.timestamp ? `${e.author} (${e.timestamp})` : e.author;
-	// Break `-->` in the author too — it sits on the entry line inside the block.
-	return `${breakTerminator(who)}: ${escapeText(sanitizeBodyText(e.text))}`;
+	// Authors are written as single tokens (whitespace → `_`, `-->` broken), the
+	// same normalization the `by:` header gets, so every entry round-trips through
+	// the strict thread-line grammar in parse.ts.
+	const author = canonicalAuthorKey(e.author);
+	const who = e.timestamp ? `${author} (${sanitizeToken(e.timestamp).replace(/[()]/g, "_")})` : author;
+	return `${who}: ${escapeText(sanitizeBodyText(e.text))}`;
 };
 
 /** Body text must never contain the comment terminator `-->`. Break it with a
@@ -62,6 +72,6 @@ const sanitizeQuote = (s: string): string => {
 	return breakTerminator(s.replace(/\s+/g, " ").replace(/"/g, "'")).trim();
 };
 
-const breakTerminator = (s: string): string => {
+export const breakTerminator = (s: string): string => {
 	return s.replace(/-->/g, "--​>");
 };

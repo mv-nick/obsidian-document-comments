@@ -2,6 +2,7 @@ import { App, Component, MarkdownRenderer, Menu, setIcon } from "obsidian";
 import type { Result } from "better-result";
 import type { AuthorColorResolver } from "../author-colors";
 import { ParsedComment, ReactionTarget } from "../format/types";
+import { malformedMessage } from "../format/parse";
 import { CardEntry, cardEntries, cardSignature, formatRelativeTime } from "./card-format";
 
 const QUICK_EMOJI = ["👍", "❤️", "😄", "🎉", "😮", "👀", "🙏"];
@@ -69,6 +70,8 @@ export class Card {
 	private md = new Component();
 	/** Re-measures overflow when the (async-rendered) content settles or changes. */
 	private ro = new ResizeObserver(() => this.measure());
+	/** Tears down an open emoji popover and its document listener. */
+	private closePopover: (() => void) | null = null;
 
 	constructor(
 		comment: ParsedComment,
@@ -123,6 +126,7 @@ export class Card {
 	destroy(): void {
 		this.ro.disconnect();
 		this.md.unload();
+		this.closePopover?.();
 		this.el.ownerDocument.removeEventListener("mousedown", this.onDocMouseDown, true);
 	}
 
@@ -185,8 +189,20 @@ export class Card {
 	private render(): void {
 		const c = this.comment;
 		this.el.empty();
+		// MarkdownRenderer attaches a child component per link/embed to `md`; a fresh
+		// component per render keeps them from accumulating for the card's lifetime.
+		this.md.unload();
+		this.md = new Component();
+		this.md.load();
 		this.el.toggleClass("is-resolved", c.status === "resolved");
 		this.el.toggleClass("is-open", this.open);
+		this.el.toggleClass("is-malformed", c.malformed !== undefined);
+		if (c.malformed) this.el.createDiv({ cls: "dc-card-warning", text: malformedMessage(c.malformed) });
+		// Header keys the plugin doesn't understand are readable by any tool that
+		// parses the file, so show them rather than leave a channel only agents see.
+		if (c.unknownKeys?.length) {
+			this.el.createDiv({ cls: "dc-card-meta", text: `Unrecognised fields: ${c.unknownKeys.join(", ")}` });
+		}
 
 		// The thread lives in a clip wrapper that gets a max-height when a tall card is
 		// collapsed; the footer (Show more / Open in sidebar) sits outside the clip.
@@ -324,7 +340,7 @@ export class Card {
 	 *  plain text when no App is available (unit tests). */
 	private renderText(el: HTMLElement, text: string): void {
 		if (this.view.app) {
-			void MarkdownRenderer.render(this.view.app, text, el, this.view.sourcePath(), this.md);
+			void MarkdownRenderer.render(this.view.app, neutralizeEmbeds(text), el, this.view.sourcePath(), this.md);
 		} else {
 			el.setText(text);
 		}
@@ -500,19 +516,22 @@ export class Card {
 		const doc = this.el.ownerDocument;
 		doc.querySelectorAll(".dc-pop").forEach((p) => p.remove());
 		const pop = doc.body.createDiv("dc-pop");
-		// Self-removing outside-click handler. Picking an emoji tears it down too, so
-		// the document listener never outlives the popover.
-		const close = (ev: MouseEvent) => {
-			if (!pop.contains(ev.target as Node)) {
-				pop.remove();
-				doc.removeEventListener("mousedown", close, true);
-			}
-		};
-		const pick = (emoji: string) => {
+		// Self-removing outside-click handler. Picking an emoji tears it down too, and
+		// destroy() calls the same teardown, so the document listener never outlives
+		// the popover or the card.
+		const teardown = () => {
 			pop.remove();
 			doc.removeEventListener("mousedown", close, true);
+			this.closePopover = null;
+		};
+		const close = (ev: MouseEvent) => {
+			if (!pop.contains(ev.target as Node)) teardown();
+		};
+		const pick = (emoji: string) => {
+			teardown();
 			this.cb.toggleReaction({ id: this.id, entry, emoji });
 		};
+		this.closePopover = teardown;
 		for (const emoji of QUICK_EMOJI) {
 			const btn = pop.createEl("button", { cls: "dc-pop__emoji", text: emoji });
 			btn.addEventListener("click", (ev) => {
@@ -556,6 +575,14 @@ export class Card {
 			.forEach((control) => (control.disabled = saving));
 	}
 }
+
+/** Comment bodies are invisible in the note yet rendered through the full Markdown
+ *  pipeline, so an image or embed in one would load on card render without anyone
+ *  having seen it in the text. Downgrade `![…]` / `![[…]]` to plain links, which
+ *  render as links and fetch nothing until clicked. */
+export const neutralizeEmbeds = (text: string): string => {
+	return text.replace(/!\[\[/g, "[[").replace(/!\[/g, "[");
+};
 
 const autogrow = (ta: HTMLTextAreaElement): void => {
 	ta.setCssStyles({ height: "auto" });

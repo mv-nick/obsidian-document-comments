@@ -16,6 +16,8 @@ export type SectionRange = {
 	/** The file this rendered block came from — an embed/preview renders another
 	 *  file's blocks, and a selection there must NOT be written into the host. */
 	sourcePath: string;
+	/** The rendered block, so a selection can be located by occurrence within it. */
+	el?: HTMLElement;
 };
 
 /** Rendered block element → its source range, so a Reading-view selection can be
@@ -53,13 +55,51 @@ export const mapReadingSelection = (
 	const highlighted = selectedHighlightRange(selection, selected, doc);
 	if (highlighted) return highlighted;
 
-	const idx = section.source.indexOf(selected);
-	if (idx < 0) return null;
+	// Never anchor into an HTML comment: the selected phrase may also appear inside
+	// another comment's thread, and writing markers there orphans the new comment
+	// and corrupts the old one — invisibly, since bodies are hidden.
+	const masks = htmlCommentRanges(section.source);
+	const candidates = occurrences(section.source, selected).filter((offset) => !isMasked(masks, offset));
+	if (candidates.length === 0) return null;
+	// The same phrase can occur more than once in a block; `indexOf` would always
+	// pick the first. Count how many times it appears in the rendered text before
+	// the selection and take the matching source occurrence.
+	const nth = section.el ? renderedOccurrenceIndex(selection, section.el, selected) : 0;
+	const idx = candidates[nth] ?? (candidates.length === 1 ? candidates[0] : undefined);
+	if (idx === undefined) return null;
 	return {
 		from: section.from + idx,
 		to: section.from + idx + selected.length,
 		expected: selected,
 	};
+};
+
+/** Non-overlapping occurrences of `needle` in `text`. */
+const occurrences = (text: string, needle: string): number[] => {
+	const out: number[] = [];
+	if (!needle) return out;
+	let from = 0;
+	for (;;) {
+		const idx = text.indexOf(needle, from);
+		if (idx < 0) return out;
+		out.push(idx);
+		from = idx + needle.length;
+	}
+};
+
+/** How many times `selected` appears in the block's rendered text before the
+ *  selection starts — its occurrence index within the block. */
+const renderedOccurrenceIndex = (selection: Selection, el: HTMLElement, selected: string): number => {
+	if (selection.rangeCount === 0) return 0;
+	const range = selection.getRangeAt(0);
+	const prefix = el.ownerDocument.createRange();
+	try {
+		prefix.setStart(el, 0);
+		prefix.setEnd(range.startContainer, range.startOffset);
+	} catch {
+		return 0;
+	}
+	return occurrences(prefix.toString(), selected).length;
 };
 
 // Parsing the whole file per rendered block would be wasteful, so cache the last
@@ -99,6 +139,7 @@ export const highlightPostProcessor = (
 		from: sectionFrom,
 		source: sectionSource,
 		sourcePath: ctx.sourcePath,
+		el,
 	});
 
 	const comments = commentsFor(text);

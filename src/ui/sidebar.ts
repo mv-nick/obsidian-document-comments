@@ -3,7 +3,7 @@ import { EditorView } from "@codemirror/view";
 import { Result } from "better-result";
 import type { AuthorColorResolver } from "../author-colors";
 import { ParsedComment } from "../format/types";
-import { anchorRange, hasCommentCard, parseComments } from "../format/parse";
+import { anchorRange, hasCommentCard, isMarkerOnly, parseComments } from "../format/parse";
 import { Card, CardCallbacks } from "./card";
 import { cardSignature } from "./card-format";
 import {
@@ -199,7 +199,12 @@ export class CommentsSidebarView extends ItemView {
 			return;
 		}
 
-		const all = parseComments(data).filter(hasCommentCard);
+		// Marker-only comments (a stray highlight with no block) and malformed blocks
+		// have no margin card, so this list is the only place they can be seen and
+		// removed or repaired from.
+		const all = parseComments(data).filter(
+			(c) => hasCommentCard(c) || isMarkerOnly(c) || c.malformed !== undefined,
+		);
 		const open = all.filter((c) => c.status !== "resolved");
 		const resolved = all.filter((c) => c.status === "resolved");
 		const shown = this.filter === "open" ? open : this.filter === "resolved" ? resolved : all;

@@ -446,10 +446,21 @@ describe("malformed / boundary edit inputs", () => {
 		expect(computeDeleteEntry(out, "k3f9", -1).isErr()).toBe(true);
 	});
 
-	it("errs when replying to a comment that has no body", () => {
-		const markerOnly = openMarker("m1") + "x" + closeMarker("m1");
-		expect(computeSetResolved(markerOnly, "m1", true).isErr()).toBe(true);
-		expect(computeAppendReply(markerOnly, "m1", { createdAt: "t", author: "a", text: "b" }).isErr()).toBe(true);
+	it("errs when replying to a comment that has no body and no complete anchor", () => {
+		const openOnly = openMarker("m1") + "x";
+		expect(computeSetResolved(openOnly, "m1", true).isErr()).toBe(true);
+		expect(computeAppendReply(openOnly, "m1", { createdAt: "t", author: "a", text: "b" }).isErr()).toBe(true);
+	});
+
+	it("gives an anchored marker-only comment a body when replied to", () => {
+		const markerOnly = openMarker("m1") + "x" + closeMarker("m1") + "\n\nNext.";
+		const out = applyChanges(
+			markerOnly,
+			computeAppendReply(markerOnly, "m1", { createdAt: "t", author: "a", text: "b" }).unwrap(),
+		);
+		const [c] = parseComments(out);
+		expect(c.body).not.toBeNull();
+		expect(c.thread).toEqual([{ author: "a", timestamp: "t", text: "b" }]);
 	});
 });
 

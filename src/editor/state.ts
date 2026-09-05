@@ -266,7 +266,11 @@ const compute = (state: EditorState): CommentFieldValue => {
 			if (code && isOwnLine(c.close)) blockHideLine(c.close.from, c.close.to);
 			else addMarker(c.close, "after");
 		}
-		if (c.body && code) {
+		if (c.body && c.malformed === "overrun") {
+			// The block has no terminator of its own and its reported range reaches
+			// into note prose. Hiding it would hide that prose too — leave the raw
+			// block visible so the damage can be seen and fixed.
+		} else if (c.body && code) {
 			blockHideLine(c.body.from, c.body.to);
 		} else if (c.body) {
 			// Swallow the newline before the body so its line disappears cleanly.

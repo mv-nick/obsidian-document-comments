@@ -113,15 +113,31 @@ export const ensureAuthorColor = (
 	author: string,
 ): { assignment: AuthorColorAssignment; created: boolean; author: string } => {
 	const key = canonicalAuthorKey(author);
-	const existing = assignments[key];
+	const existing = ownAssignment(assignments, key);
 	if (existing) return { assignment: existing, created: false, author: key };
 
 	const assignment: AuthorColorAssignment = {
 		color: generatedColorForAuthor(key, assignments),
 		mode: "generated",
 	};
-	assignments[key] = assignment;
+	// Define rather than assign: an author named `__proto__` must become an own
+	// property, not the object's prototype.
+	Object.defineProperty(assignments, key, {
+		value: assignment,
+		enumerable: true,
+		writable: true,
+		configurable: true,
+	});
 	return { assignment, created: true, author: key };
+};
+
+/** Own-property read, so prototype names (`constructor`, `__proto__`) used as author
+ *  handles read as unassigned instead of returning `Object.prototype` members. */
+const ownAssignment = (
+	assignments: Readonly<AuthorColorAssignments>,
+	key: string,
+): AuthorColorAssignment | undefined => {
+	return Object.prototype.hasOwnProperty.call(assignments, key) ? assignments[key] : undefined;
 };
 
 export const ensureAuthorColors = (
@@ -149,7 +165,7 @@ export const readAuthorColor = (
 	if (!enabled) return null;
 	const key = canonicalAuthorKey(author);
 	if (!key || excludedAuthors.has(key)) return null;
-	return assignments[key]?.color ?? null;
+	return ownAssignment(assignments, key)?.color ?? null;
 };
 
 export const authorColorCss = (color: ResolvedAuthorColor): string => color ?? "var(--text-normal)";

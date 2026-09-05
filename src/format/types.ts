@@ -41,6 +41,19 @@ export type TextRange = {
 	to: number;
 };
 
+/** Why a body block is not the well-formed shape the serializer writes.
+ *  - `unterminated`: `<!--co:` with no `-->` anywhere after it. Every HTML renderer
+ *    swallows the rest of the file; the plugin records the header and hides nothing.
+ *  - `terminator-in-header`: a `-->` on the header line (typically a `quote:` that
+ *    copied another comment's markers verbatim). HTML renderers end the comment
+ *    there and show the thread as prose; the plugin still reads the block whole,
+ *    and any rewrite repairs it because the serializer breaks `-->` in quotes.
+ *  - `terminator-in-text`: the block ends at a `-->` typed inside an entry, so the
+ *    rest of the thread is visible prose. Rewriting or deleting would strand it.
+ *  - `overrun`: the block has no terminator of its own and runs into another
+ *    comment's markers. Deleting it would delete the prose in between. */
+export type MalformedReason = "unterminated" | "terminator-in-header" | "terminator-in-text" | "overrun";
+
 /** A comment as found in a document, with resolved offsets for each piece. */
 export type ParsedComment = {
 	id: string;
@@ -50,4 +63,10 @@ export type ParsedComment = {
 	close: TextRange | null;
 	/** `<!--co:ID ...-->` body block range, or null if missing. */
 	body: TextRange | null;
+	/** Set when the body block is not well formed. Edits refuse to rewrite or delete
+	 *  such a comment (except `terminator-in-header`, which a rewrite repairs). */
+	malformed?: MalformedReason;
+	/** Header keys the plugin does not understand. Shown on the card so nothing an
+	 *  agent can read is invisible to the person; dropped on rewrite. */
+	unknownKeys?: string[];
 } & CommentData;

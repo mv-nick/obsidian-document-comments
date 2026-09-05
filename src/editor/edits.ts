@@ -1,6 +1,18 @@
 import { Result } from "better-result";
 import { CommentData, ParsedComment, Reaction, ReactionTarget } from "../format/types";
-import { anchorRange, isAnchored, isHighlight, isInFencedCode, parseComments } from "../format/parse";
+import {
+	allBodyRanges,
+	anchorRange,
+	frontmatterRange,
+	isAnchored,
+	isHighlight,
+	isInFencedCode,
+	isInside,
+	isUneditable,
+	malformedMessage,
+	maskedRanges,
+	parseComments,
+} from "../format/parse";
 import { codeSelectionTarget, isCodeComment, resolveCodeAnchor } from "../format/code-anchor";
 import { closeMarker, openMarker, serializeBody } from "../format/serialize";
 
@@ -43,6 +55,9 @@ export const computeAddComment = (
 	input: NewCommentInput,
 ): Result<Change[], string> => {
 	if (to < from) [from, to] = [to, from];
+	if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to > doc.length) {
+		return Result.err("The selection is outside the document.");
+	}
 	if (input.targetHighlightId) {
 		const target = parseComments(doc).find((comment) => comment.id === input.targetHighlightId);
 		if (!target?.body || !isAnchored(target)) {
@@ -63,6 +78,12 @@ export const computeAddComment = (
 	if (to === from) return Result.err("Select some text to comment on.");
 	if (input.expected !== undefined && doc.slice(from, to) !== input.expected) {
 		return Result.err("The selection moved — try adding the comment again.");
+	}
+	// Markers inside frontmatter would become part of a YAML value — including keys
+	// other tools manage — and the editor hides them, so the damage is invisible.
+	const frontmatter = frontmatterRange(doc);
+	if (frontmatter && from < frontmatter.to) {
+		return Result.err("Comments can't be anchored inside the note's frontmatter.");
 	}
 	const highlight = findHighlightAtSelection(doc, from, to);
 	if (highlight) {
@@ -217,7 +238,7 @@ export const computeSetResolved = (doc: string, id: string, resolved: boolean): 
 /** Replace the text of the i-th message in a thread. */
 export const computeEditEntry = (doc: string, id: string, index: number, text: string): Result<Change[], string> => {
 	return replaceBody(doc, id, (c) => {
-		if (index < 0 || index >= c.thread.length) return null;
+		if (!Number.isSafeInteger(index) || index < 0 || index >= c.thread.length) return null;
 		return { ...toData(c), thread: c.thread.map((e, i) => (i === index ? { ...e, text } : e)) };
 	});
 };
@@ -225,7 +246,7 @@ export const computeEditEntry = (doc: string, id: string, index: number, text: s
 /** Remove the i-th message from a thread (used for replies). */
 export const computeDeleteEntry = (doc: string, id: string, index: number): Result<Change[], string> => {
 	return replaceBody(doc, id, (c) => {
-		if (index < 0 || index >= c.thread.length) return null;
+		if (!Number.isSafeInteger(index) || index < 0 || index >= c.thread.length) return null;
 		return {
 			...toData(c),
 			thread: c.thread.filter((_, i) => i !== index),
@@ -256,10 +277,17 @@ const replaceBody = (
 ): Result<Change[], string> => {
 	const c = parseComments(doc).find((x) => x.id === id);
 	if (!c) return Result.err("Comment not found.");
-	if (!c.body) return Result.err("Comment has no body to update.");
+	// A malformed block's reported range covers text that isn't the comment's own;
+	// rewriting it would relocate note prose into a hidden block.
+	if (isUneditable(c) && c.malformed) return Result.err(malformedMessage(c.malformed));
 	const data = mutate(c);
 	if (!data) return Result.err("That reply no longer exists.");
-	return Result.ok([{ from: c.body.from, to: c.body.to, insert: serializeBody(id, data) }]);
+	if (c.body) return Result.ok([{ from: c.body.from, to: c.body.to, insert: serializeBody(id, data) }]);
+	// Marker-only comment (anchors, no block): give it a body after the anchored
+	// block, which turns an unremovable stray highlight back into a real comment.
+	if (!isAnchored(c) || !c.close) return Result.err("Comment has no body to update.");
+	const paraEnd = blockEnd(doc, c.close.to);
+	return Result.ok([{ from: paraEnd, to: paraEnd, insert: "\n" + serializeBody(id, data) }]);
 };
 
 const toData = (c: ParsedComment): CommentData => {
@@ -298,7 +326,14 @@ const reactionsAfterEntryDelete = (reactions: Reaction[], deletedEntry: number):
 };
 
 export const computeDeleteComment = (doc: string, id: string): Result<Change[], string> => {
-	if (!parseComments(doc).some((x) => x.id === id)) return Result.err("Comment not found.");
+	const comment = parseComments(doc).find((x) => x.id === id);
+	if (!comment) return Result.err("Comment not found.");
+	// A malformed block's range reaches into prose (or stops short of the thread);
+	// deleting it would delete or strand text that isn't the comment's.
+	if (isUneditable(comment) && comment.malformed) return Result.err(malformedMessage(comment.malformed));
+	// The parser ignores markers inside fenced/inline code; so must the sweep, or
+	// deleting a live comment rewrites a documentation example that shares its id.
+	const masks = maskedRanges(doc);
 	// Remove EVERY occurrence of this id's markers/body, not just the first the
 	// parser records. Copy-pasting a commented span duplicates the markers; deleting
 	// only the first pair used to leave invisible, UI-unremovable leftovers behind.
@@ -317,18 +352,22 @@ export const computeDeleteComment = (doc: string, id: string): Result<Change[], 
 	const aloneOnLine = (from: number, to: number): boolean =>
 		(from === 0 || leadingTerm(from) > 0) && (to === doc.length || trailingTerm(to) > 0);
 	scanAll(doc, new RegExp(`<!--c:${id}-->`, "g"), (from, to) => {
+		if (isInside(masks, from)) return;
 		const end = aloneOnLine(from, to) ? to + trailingTerm(to) : to;
 		ranges.push({ from, to: end, insert: "" });
 	});
 	scanAll(doc, new RegExp(`<!--/c:${id}-->`, "g"), (from, to) => {
+		if (isInside(masks, from)) return;
 		const start = aloneOnLine(from, to) ? from - leadingTerm(from) : from;
 		ranges.push({ from: start, to, insert: "" });
 	});
-	scanAll(doc, new RegExp(`<!--co:${id}(?![A-Za-z0-9])[\\s\\S]*?-->`, "g"), (from, to) => {
+	// Body ranges come from the parser (linear scan, aware of a `-->` inside the
+	// header), never from a lazy regex that would stop at the first `-->` it sees.
+	for (const { from, to } of allBodyRanges(doc, id)) {
 		// Swallow the whole line terminator before the body so its line disappears
 		// cleanly, CR included, leaving no stray blank line.
 		ranges.push({ from: from - leadingTerm(from), to, insert: "" });
-	});
+	}
 	if (ranges.length === 0) return Result.err("Nothing to delete.");
 	ranges.sort((a, b) => a.from - b.from);
 	return Result.ok(ranges);
@@ -340,8 +379,21 @@ const scanAll = (doc: string, re: RegExp, fn: (from: number, to: number) => void
 	while ((m = re.exec(doc))) fn(m.index, m.index + m[0].length);
 };
 
-/** Apply changes (original coordinates, CM semantics) — used by tests. */
+/** Apply changes (original coordinates, CM semantics) — the write path for every
+ *  `vault.process` edit, and used by tests. Refuses out-of-range changes: a negative
+ *  offset would duplicate and reorder document text instead of failing. */
 export const applyChanges = (doc: string, changes: Change[]): string => {
+	for (const c of changes) {
+		if (
+			!Number.isSafeInteger(c.from) ||
+			!Number.isSafeInteger(c.to) ||
+			c.from < 0 ||
+			c.to < c.from ||
+			c.to > doc.length
+		) {
+			throw new RangeError(`Change ${c.from}–${c.to} is outside a ${doc.length}-character document.`);
+		}
+	}
 	const ordered = changes.map((c, i) => ({ ...c, i })).sort((a, b) => a.from - b.from || a.i - b.i);
 	// Single pass building the output string while advancing a consumed-up-to
 	// watermark — two coupled outputs, so a plain map/reduce wouldn't read cleaner.

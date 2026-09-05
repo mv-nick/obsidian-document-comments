@@ -532,8 +532,11 @@ export default class DocCommentsPlugin extends Plugin {
 		this.authorIndex?.dispose();
 	}
 
+	/** The configured author as the single token the format stores (whitespace → `_`,
+	 *  `-->` broken). Canonicalizing here means thread lines, reactions and the `by:`
+	 *  header all agree, and a name typed with `-->` can't end a block early. */
 	private authorName(): string {
-		return this.settings.author.trim() || "me";
+		return canonicalAuthorKey(this.settings.author) || "me";
 	}
 
 	colorForAuthor(author: string): ResolvedAuthorColor {

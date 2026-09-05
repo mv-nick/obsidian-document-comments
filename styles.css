@@ -625,3 +625,25 @@ body {
 	min-height: 5em;
 	resize: vertical;
 }
+
+/* ── Needs-repair badge and unknown-field note on a card ──────────────────
+   A malformed block (see MalformedReason in types.ts) can't be edited safely;
+   the card says why. Unknown header keys are surfaced so nothing readable by a
+   tool is invisible to the person. */
+.doc-comment-card.is-malformed {
+	border-color: var(--text-error);
+}
+.dc-card-warning {
+	margin: 6px 10px 0;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background-color: var(--background-modifier-error);
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.35;
+}
+.dc-card-meta {
+	margin: 4px 10px 0;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
