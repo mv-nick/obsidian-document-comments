@@ -7,11 +7,16 @@ import type { ReactionTarget } from "../format/types";
 import {
 	Change,
 	applyChanges,
+	computeAcceptSuggestion,
 	computeAddComment,
+	computeAddSuggestion,
 	computeAppendReply,
 	computeDeleteComment,
 	computeDeleteEntry,
 	computeEditEntry,
+	computeRejectSuggestion,
+	computeResolveAllSuggestions,
+	computeSetProposal,
 	computeSetResolved,
 	computeToggleReaction,
 	findHighlightAtSelection,
@@ -89,6 +94,58 @@ export const toggleReaction = ({
 	author,
 }: ToggleReactionCommandInput): Result<void, string> => {
 	return computeToggleReaction({ doc: view.state.doc.toString(), id, entry, emoji, author }).map((changes) => {
+		view.dispatch({ changes });
+	});
+};
+
+// ── Suggestions (live editor) ────────────────────────────────────────────────
+
+/** Create a suggestion on [from,to] (empty for an insertion). Ok carries the id. */
+export const addSuggestion = (
+	view: EditorView,
+	from: number,
+	to: number,
+	proposal: string,
+	note: string,
+	author: string,
+	expected?: string,
+): Result<string, string> => {
+	const doc = view.state.doc.toString();
+	const id = generateId(existingIds(doc));
+	return computeAddSuggestion(doc, from, to, {
+		id,
+		createdAt: now(),
+		author,
+		proposal,
+		text: note || undefined,
+		expected,
+	}).map((changes) => {
+		view.dispatch({ changes, scrollIntoView: false });
+		return id;
+	});
+};
+
+export const acceptSuggestion = (view: EditorView, id: string): Result<void, string> => {
+	return computeAcceptSuggestion(view.state.doc.toString(), id).map((changes) => {
+		view.dispatch({ changes });
+	});
+};
+
+export const rejectSuggestion = (view: EditorView, id: string): Result<void, string> => {
+	return computeRejectSuggestion(view.state.doc.toString(), id).map((changes) => {
+		view.dispatch({ changes });
+	});
+};
+
+export const setProposal = (view: EditorView, id: string, proposal: string): Result<void, string> => {
+	return computeSetProposal(view.state.doc.toString(), id, proposal).map((changes) => {
+		view.dispatch({ changes });
+	});
+};
+
+/** Accept or reject every suggestion in the note as one undoable transaction. */
+export const resolveAllSuggestions = (view: EditorView, action: "accept" | "reject"): Result<void, string> => {
+	return computeResolveAllSuggestions(view.state.doc.toString(), action).map((changes) => {
 		view.dispatch({ changes });
 	});
 };

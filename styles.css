@@ -647,3 +647,77 @@ body {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
 }
+
+/* ── Suggestions ──────────────────────────────────────────────────────────────
+   A suggestion proposes text for its anchored range. The anchored text reads as
+   struck through; the proposal follows it inline (a widget in Live Preview, a
+   span in Reading view). Accepting writes the proposal into the note. */
+.doc-comment-span.is-suggestion {
+	text-decoration-line: line-through;
+	text-decoration-thickness: 1.5px;
+	background-color: color-mix(in srgb, var(--color-red) 14%, transparent);
+	border-bottom-color: color-mix(in srgb, var(--color-red) 55%, transparent);
+}
+.dc-proposal {
+	color: var(--text-normal);
+	background-color: color-mix(in srgb, var(--color-green) 16%, transparent);
+	border-bottom: 2px solid color-mix(in srgb, var(--color-green) 60%, transparent);
+	border-radius: 2px;
+	padding: 0 1px;
+	white-space: pre-wrap;
+}
+.cm-editor:not(.dc-highlights) .dc-proposal,
+.markdown-reading-view:not(.dc-highlights) .dc-proposal,
+.cm-editor:not(.dc-highlights) .doc-comment-span.is-suggestion,
+.markdown-reading-view:not(.dc-highlights) .doc-comment-span.is-suggestion {
+	text-decoration-line: none;
+}
+.cm-editor:not(.dc-highlights) .dc-proposal,
+.markdown-reading-view:not(.dc-highlights) .dc-proposal {
+	display: none;
+}
+.dc-suggest {
+	margin-bottom: 8px;
+}
+.dc-suggest__label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-bottom: 4px;
+}
+.dc-suggest__proposal {
+	padding: 4px 8px;
+	border-radius: 4px;
+	background-color: color-mix(in srgb, var(--color-green) 12%, transparent);
+	color: var(--text-normal);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	cursor: text;
+}
+.dc-suggest__proposal.is-delete {
+	text-decoration-line: line-through;
+	color: var(--text-muted);
+	background-color: color-mix(in srgb, var(--color-red) 12%, transparent);
+}
+.dc-suggest__actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+.dc-suggest__btn {
+	font-size: var(--font-ui-small);
+	padding: 2px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.dc-suggest__btn.is-accept {
+	background-color: var(--color-green);
+	color: var(--text-on-accent);
+}
+.dc-field__label {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin: 4px 0 2px;
+}
+.doc-comment-span.dc-draft-suggest {
+	--dc-highlight-color: var(--color-red);
+}

@@ -11,6 +11,8 @@ export type CardEntry = {
 /** Give an empty comment one visible placeholder entry without changing its data. */
 export const cardEntries = (comment: ParsedComment): CardEntry[] => {
 	if (comment.thread.length > 0) return comment.thread.map((entry) => ({ ...entry, empty: false }));
+	// A suggestion's proposal is its content; an empty discussion needs no placeholder.
+	if (comment.proposal !== undefined) return [];
 	return [
 		{
 			author: comment.author ?? "",
@@ -27,7 +29,17 @@ export const cardEntries = (comment: ParsedComment): CardEntry[] => {
  * field that affects what the card shows must be included, or edits go unseen.
  */
 export const cardSignature = (c: ParsedComment): string => {
-	return JSON.stringify([c.status, c.author, c.createdAt, c.thread, c.reactions, isAnchored(c)]);
+	return JSON.stringify([
+		c.status,
+		c.author,
+		c.createdAt,
+		c.thread,
+		c.reactions,
+		isAnchored(c),
+		c.proposal,
+		c.malformed,
+		c.unknownKeys,
+	]);
 };
 
 /** A short relative time ("just now", "5m", "3h", "2d") that falls back to an

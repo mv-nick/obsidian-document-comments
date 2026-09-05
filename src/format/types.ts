@@ -32,9 +32,18 @@ export type CommentData = {
 	 *  (0-based, inclusive) the comment actually targets. `quote` is the re-anchor
 	 *  key; these lines are the fast path and the disambiguator. */
 	codeLines?: TextRange;
+	/** Present when this comment is a **suggestion**: the text proposed to replace
+	 *  the anchored range. `""` proposes deleting it; an empty anchor with a
+	 *  non-empty proposal proposes an insertion. Stored as the first body line,
+	 *  `=>: text`, which older readers show as a reply by an author called `=>`
+	 *  and preserve on rewrite. */
+	proposal?: string;
 	thread: ThreadEntry[];
 	reactions: Reaction[];
 };
+
+/** What accepting a suggestion would do, derived from its anchor and proposal. */
+export type SuggestionKind = "replace" | "insert" | "delete";
 
 export type TextRange = {
 	from: number;

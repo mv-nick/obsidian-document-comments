@@ -1,5 +1,15 @@
-import { CommentData, CommentStatus, MalformedReason, ParsedComment, Reaction, TextRange, ThreadEntry } from "./types";
+import {
+	CommentData,
+	CommentStatus,
+	MalformedReason,
+	ParsedComment,
+	Reaction,
+	SuggestionKind,
+	TextRange,
+	ThreadEntry,
+} from "./types";
 import { decodeCodeQuote, splitReactionAuthors, unescapeText } from "./escape";
+import { PROPOSAL_AUTHOR } from "./serialize";
 
 // Anchor markers. Both are HTML comments so they're invisible everywhere. The id
 // grammar ([A-Za-z0-9]+) is load-bearing beyond parsing: edits.ts interpolates ids
@@ -92,6 +102,7 @@ export const parseComments = (doc: string): ParsedComment[] => {
 			close: closes.get(id) ?? null,
 			body: body?.range ?? null,
 		};
+		if (data.proposal !== undefined) comment.proposal = data.proposal;
 		if (body?.malformed) comment.malformed = body.malformed;
 		if (body && body.unknownKeys.length > 0) comment.unknownKeys = body.unknownKeys;
 		return comment;
@@ -192,10 +203,31 @@ const bodyMatch = (
 	malformed?: MalformedReason,
 ): BodyMatch => {
 	const { data, unknownKeys } = parseHeader(header);
-	const { thread, reactions } = parseBody(block);
+	const { thread, reactions, proposal } = extractProposal(parseBody(block));
 	const match: BodyMatch = { id, range, data: { ...data, thread, reactions }, unknownKeys };
+	if (proposal !== undefined) match.data.proposal = proposal;
 	if (malformed) match.malformed = malformed;
 	return match;
+};
+
+/** A first entry by the reserved author `=>` is a suggestion's proposal, not a
+ *  message. Only the first position counts, so a prose line that happens to start
+ *  with `=>` never turns a comment into a suggestion. Reaction indices are stored
+ *  as raw line positions, so with a proposal present each discussion entry is one
+ *  lower; a reaction on the proposal line itself lands on the first entry. */
+const extractProposal = (body: {
+	thread: ThreadEntry[];
+	reactions: Reaction[];
+}): { thread: ThreadEntry[]; reactions: Reaction[]; proposal?: string } => {
+	const first = body.thread[0];
+	if (!first || first.author !== PROPOSAL_AUTHOR) return body;
+	const reactions = body.reactions.map((reaction) => {
+		const entry = Math.max(0, (reaction.entry ?? 0) - 1);
+		const shifted: Reaction = { emoji: reaction.emoji, authors: reaction.authors };
+		if (entry > 0) shifted.entry = entry;
+		return shifted;
+	});
+	return { thread: body.thread.slice(1), reactions, proposal: first.text };
 };
 
 /** Every body range carrying `id`, including duplicate copies the first-wins parse
@@ -257,6 +289,21 @@ export const anchorRange = (c: ParsedComment): TextRange | null => {
 /** Has content (a body) but is not properly anchored — show in the unanchored list. */
 export const isOrphan = (c: ParsedComment): boolean => {
 	return !!c.body && !isAnchored(c);
+};
+
+/** A suggestion proposes text for its anchored range; a plain comment does not. */
+export const isSuggestion = (c: ParsedComment): boolean => {
+	return c.proposal !== undefined;
+};
+
+/** What accepting the suggestion would do, or null for a plain comment or one
+ *  whose anchor is gone. */
+export const suggestionKind = (c: ParsedComment): SuggestionKind | null => {
+	if (c.proposal === undefined) return null;
+	const range = anchorRange(c);
+	if (!range) return null;
+	if (range.from === range.to) return "insert";
+	return c.proposal === "" ? "delete" : "replace";
 };
 
 /** True when a rewrite or delete of this comment would touch text that is not its

@@ -7,6 +7,8 @@ silently break:
   INVALID ID     an id with a character outside [A-Za-z0-9] — the parser
                  discards the marker and the comment never renders
   MARKERS-ONLY   anchor markers with no body block (a half-deleted comment)
+  SUGGESTION/…   an anchored comment whose first body line is `=>: proposal`
+                 (replace, delete or insert); informational, not a problem
   MALFORMED      a body block that is not the shape the plugin writes:
                    unterminated          no --> anywhere after <!--co:
                    terminator-in-header  a --> on the header line (usually a
@@ -239,9 +241,19 @@ def analyze(doc):
         anchored = has_open and has_close and opens[cid] <= closes[cid]
         header, block, reason = (bodies[cid][0], bodies[cid][1], bodies[cid][2]) if has_body else ("", "", None)
         attrs, unknown = parse_header(header)
-        entries = [ln for ln in block.split("\n") if ln.strip() and not ln.startswith("+") and parse_entry(ln.rstrip("\r"))]
+        lines = [ln.rstrip("\r") for ln in block.split("\n") if ln.strip() and not ln.startswith("+")]
+        parsed = [parse_entry(ln) for ln in lines]
+        entries = [e for e in parsed if e]
+        # A first entry by the reserved author `=>` is a suggestion's proposal.
+        suggestion = bool(parsed) and parsed[0] is not None and parsed[0][0] == "=>"
         if reason:
-            state = f"MALFORMED"
+            state = "MALFORMED"
+        elif suggestion and anchored:
+            proposal = parsed[0][2]
+            kind = "insert" if opens[cid] + len(f"<!--c:{cid}-->") == closes[cid] else ("delete" if proposal == "" else "replace")
+            state = f"SUGGESTION/{kind}"
+        elif suggestion:
+            state = "ORPHAN"
         elif anchored and has_body:
             state = "HIGHLIGHT" if not block.strip() else "ANCHORED"
         elif has_body:

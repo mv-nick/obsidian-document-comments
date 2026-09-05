@@ -18,12 +18,14 @@ The plugin stores each comment inside its Markdown file as an HTML comment. Othe
 - Reply, resolve, reopen, edit, delete, or react to a comment.
 - Write Markdown in comments, including links, lists, bold text, and code spans.
 - Use the same notes on desktop and mobile.
+- **Suggest edits** (fork): propose replacement, inserted, or deleted text without changing the note. The note's owner accepts or rejects each suggestion in the margin, or all at once.
+- Malformed comment blocks are flagged with the reason and repair, and are never rewritten or deleted by the plugin until fixed (fork).
 
 ### Views and controls
 
 - Show comment cards in Live Preview, Source view, and Reading view.
 - Open long comments in the sidebar.
-- Filter the sidebar by open, resolved, or all comments.
+- Filter the sidebar by open, suggestions, resolved, or all comments.
 - Hide the comment cards, the highlights, or the resolved comments, each on its own.
 
 ## Comment format
@@ -53,6 +55,18 @@ We should <!--c:h7k2-->ship on Friday<!--/c:h7k2--> regardless of the QA timelin
 <!--co:h7k2 by:kyle at:2026-06-17T10:00:00.000Z status:open quote:"ship on Friday"
 -->
 ```
+
+A **suggestion** is a comment whose first body line, by the reserved author `=>`, is the text proposed for the anchored range. The note itself is unchanged until the suggestion is accepted, so every other renderer shows the original text:
+
+```markdown
+We should <!--c:s2m4-->ship on Friday<!--/c:s2m4--> regardless of the QA timeline.
+<!--co:s2m4 by:nick at:2026-09-05T10:00:00.000Z status:open quote:"ship on Friday"
+=>: ship on Thursday
+nick (2026-09-05T10:00:00.000Z): QA asked for the extra day.
+-->
+```
+
+`=>: ` with nothing after it proposes deleting the text; an empty marker pair `<!--c:ID--><!--/c:ID-->` with a proposal proposes an insertion at that point. Accepting replaces the markers and the text between them with the proposal and removes the block; rejecting removes the markers and block. Older readers see the proposal as a reply by `=>` and keep it.
 
 ## Install
 
@@ -161,6 +175,15 @@ Use the **Open comments sidebar** command or ribbon icon to show all comments in
 Use **Toggle comments** to show or hide the comment cards. Use **Toggle resolved comments** to show or hide resolved comments.
 
 Highlights have their own switch. Use **Toggle highlights**, or **Show highlights** in **Settings → Document Comments**, to hide the highlighted text and keep the cards. Turn off **Toggle comments** to hide the cards and keep the highlights. Read and manage the hidden cards in the sidebar.
+
+### Suggest an edit
+
+1. Select the text to change, or place the cursor where text should be inserted.
+2. Run **Suggest an edit** from the command palette or the right-click menu (**Suggest an insertion** when nothing is selected).
+3. Edit the replacement in the composer. Leave it empty to suggest deleting the selection. Add a note if you like.
+4. Press Enter.
+
+The selected text shows struck through with the proposal beside it. The margin card shows who suggests what, with **Accept** and **Reject**; double-click the proposal (or use **Edit suggestion** in the card menu) to change it, and reply to discuss it. **Accept current suggestion** / **Reject current suggestion** act on the suggestion under the cursor; **Accept all suggestions in note** / **Reject all suggestions in note** apply every one in a single undoable step. Suggestions cannot overlap one another and are not available inside fenced code blocks.
 
 ### Set the author
 

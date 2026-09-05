@@ -10,11 +10,15 @@ import { Draft, clearDraft, draftField } from "./draft";
 import { Card, CardCallbacks, CardView } from "../ui/card";
 import { cardSignature } from "../ui/card-format";
 import {
+	acceptSuggestion,
 	addComment,
+	addSuggestion,
 	appendReply,
 	deleteComment,
 	deleteEntry,
 	editEntry,
+	rejectSuggestion,
+	setProposal,
 	setResolved,
 	toggleReaction,
 } from "./commands";
@@ -85,6 +89,9 @@ class MarginView implements PluginValue {
 			toggleReaction: ({ id, entry, emoji }) =>
 				notifyErr(toggleReaction({ view, id, entry, emoji, author: this.cb.getAuthor() })),
 			openInSidebar: (id) => view.state.facet(commentConfig).openInSidebar?.(id),
+			acceptSuggestion: (id) => notifyErr(acceptSuggestion(view, id)),
+			rejectSuggestion: (id) => notifyErr(rejectSuggestion(view, id)),
+			setProposal: (id, proposal) => notifyErr(setProposal(view, id, proposal)),
 		};
 
 		view.scrollDOM.addEventListener("scroll", this.scrollHandler, { passive: true });
@@ -245,10 +252,16 @@ class MarginView implements PluginValue {
 			// Click away from an empty draft dismisses it (Notion behavior).
 			this.draftOutside = (e: MouseEvent) => {
 				if (!this.draftEl || this.draftEl.contains(e.target as Node)) return;
-				const ta = this.draftEl.querySelector("textarea");
-				if (ta instanceof HTMLTextAreaElement && !ta.disabled && ta.value.trim() === "") {
-					this.view.dispatch({ effects: clearDraft.of(null) });
-				}
+				const fields = [...this.draftEl.querySelectorAll<HTMLTextAreaElement>("textarea")];
+				if (fields.some((ta) => ta.disabled)) return;
+				// Untouched: an empty comment, or a suggestion whose replacement still
+				// equals the selected text and has no note.
+				const untouched = fields.every((ta) =>
+					ta.classList.contains("dc-field__proposal")
+						? ta.value === (ta.getAttribute("data-dc-initial") ?? "")
+						: ta.value.trim() === "",
+				);
+				if (fields.length > 0 && untouched) this.view.dispatch({ effects: clearDraft.of(null) });
 			};
 			this.view.dom.ownerDocument.addEventListener("mousedown", this.draftOutside, true);
 		} else if (!draft && this.draftEl) {
@@ -276,7 +289,20 @@ class MarginView implements PluginValue {
 		const initialDraft = this.view.state.field(draftField, false);
 		// Editor path: offsets come live from draftField (mapped through every edit),
 		// so no stale-offset verification is needed here.
+		const suggest = initialDraft?.mode === "suggest";
 		const { el, setEmptyAction } = buildDraftComposer({
+			mode: suggest ? "suggest" : "comment",
+			insertion: suggest && initialDraft.from === initialDraft.to,
+			initialProposal: suggest ? this.view.state.doc.sliceString(initialDraft.from, initialDraft.to) : undefined,
+			onSubmitSuggestion: (proposal, note) => {
+				const draft = this.view.state.field(draftField, false);
+				if (!draft) return Result.err("The suggestion draft no longer exists.");
+				const result = notifyErr(
+					addSuggestion(this.view, draft.from, draft.to, proposal, note, this.cb.getAuthor()),
+				);
+				if (result.isOk()) this.view.dispatch({ effects: clearDraft.of(null) });
+				return result.map(() => undefined);
+			},
 			emptyAction: initialDraft ? this.emptyAction(initialDraft) : "none",
 			onCancel: () => this.view.dispatch({ effects: clearDraft.of(null) }),
 			onSubmit: (text) => {

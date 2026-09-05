@@ -13,13 +13,21 @@ import {
 } from "obsidian";
 import { Result } from "better-result";
 import { EditorView } from "@codemirror/view";
-import { commentField, refreshCommentColors } from "./editor/state";
+import { commentField, getComments, refreshCommentColors } from "./editor/state";
 import { marginPlugin } from "./editor/margin";
 import { commentConfig } from "./editor/config";
 import { editorLayoutField } from "./editor/layout";
 import { draftField, setDraft } from "./editor/draft";
-import { addComment, insertCommentInFile } from "./editor/commands";
+import {
+	acceptSuggestion,
+	addComment,
+	addSuggestion,
+	insertCommentInFile,
+	rejectSuggestion,
+	resolveAllSuggestions,
+} from "./editor/commands";
 import { findHighlightAtSelection } from "./editor/edits";
+import { anchorRange, isSuggestion } from "./format/parse";
 import { findSectionRange, highlightPostProcessor, mapReadingSelection } from "./reading/highlight";
 import { ReadingDeps, ReadingMarginManager } from "./reading/margin";
 import { COMMENTS_VIEW_TYPE, CommentsSidebarView, SidebarDeps } from "./ui/sidebar";
@@ -196,17 +204,52 @@ export default class DocCommentsPlugin extends Plugin {
 			editorCallback: (editor) => this.startAddComment(editor),
 		});
 
-		// Same entry point as the command, in the editor's right-click menu. Only
-		// offered with a selection, since a comment needs a range to anchor to.
+		this.addCommand({
+			id: "suggest-edit",
+			name: "Suggest an edit",
+			editorCallback: (editor) => this.startSuggestEdit(editor),
+		});
+		this.addCommand({
+			id: "accept-suggestion",
+			name: "Accept current suggestion",
+			editorCheckCallback: (checking, editor) => this.suggestionAtCursor(editor, checking, "accept"),
+		});
+		this.addCommand({
+			id: "reject-suggestion",
+			name: "Reject current suggestion",
+			editorCheckCallback: (checking, editor) => this.suggestionAtCursor(editor, checking, "reject"),
+		});
+		this.addCommand({
+			id: "accept-all-suggestions",
+			name: "Accept all suggestions in note",
+			editorCallback: (editor) => this.resolveAllSuggestionsIn(editor, "accept"),
+		});
+		this.addCommand({
+			id: "reject-all-suggestions",
+			name: "Reject all suggestions in note",
+			editorCallback: (editor) => this.resolveAllSuggestionsIn(editor, "reject"),
+		});
+
+		// Same entry points as the commands, in the editor's right-click menu. A
+		// comment needs a selection to anchor to; a suggestion can also insert at the
+		// cursor.
 		this.registerEvent(
 			this.app.workspace.on("editor-menu", (menu, editor) => {
-				if (!editor.somethingSelected()) return;
+				if (editor.somethingSelected()) {
+					menu.addItem((item) =>
+						item
+							.setSection("selection")
+							.setTitle("Add comment")
+							.setIcon("message-square")
+							.onClick(() => this.startAddComment(editor)),
+					);
+				}
 				menu.addItem((item) =>
 					item
 						.setSection("selection")
-						.setTitle("Add comment")
-						.setIcon("message-square")
-						.onClick(() => this.startAddComment(editor)),
+						.setTitle(editor.somethingSelected() ? "Suggest an edit" : "Suggest an insertion")
+						.setIcon("pencil-line")
+						.onClick(() => this.startSuggestEdit(editor)),
 				);
 			}),
 		);
@@ -301,6 +344,64 @@ export default class DocCommentsPlugin extends Plugin {
 		}
 		// Show a draft composer card in the margin (Notion-style) instead of a modal.
 		view.dispatch({ effects: setDraft.of({ from, to, targetHighlightId }) });
+	}
+
+	/** "Suggest an edit": like a comment, but the composer collects a replacement for
+	 *  the selection (prefilled with it), or text to insert at the cursor. */
+	private startSuggestEdit(editor: Editor): void {
+		const view = editorView(editor);
+		if (!view) {
+			new Notice("Couldn't access the editor.");
+			return;
+		}
+		const { from, to } = view.state.selection.main;
+		if (Platform.isMobile) {
+			const quote = view.state.doc.sliceString(from, to);
+			new CommentModal(this.app, quote, () => Result.ok(undefined), "none", {
+				mode: "suggest",
+				insertion: from === to,
+				onSubmitSuggestion: (proposal, note) => {
+					const result = addSuggestion(view, from, to, proposal, note, this.authorName(), quote);
+					if (result.isErr()) new Notice(`Couldn't add the suggestion: ${result.error}`);
+					return result.map(() => undefined);
+				},
+			}).open();
+			return;
+		}
+		view.dispatch({ effects: setDraft.of({ from, to, mode: "suggest" }) });
+	}
+
+	/** Accept or reject the suggestion whose text or block contains the cursor. */
+	private suggestionAtCursor(editor: Editor, checking: boolean, action: "accept" | "reject"): boolean {
+		const view = editorView(editor);
+		if (!view) return false;
+		const pos = view.state.selection.main.head;
+		const target = getComments(view.state)
+			.filter(isSuggestion)
+			.find((c) => {
+				const range = anchorRange(c);
+				return (
+					(range !== null && range.from <= pos && pos <= range.to) ||
+					(c.body !== null && c.body.from <= pos && pos <= c.body.to)
+				);
+			});
+		if (!target) return false;
+		if (checking) return true;
+		const result = action === "accept" ? acceptSuggestion(view, target.id) : rejectSuggestion(view, target.id);
+		if (result.isErr()) new Notice(`Couldn't ${action} the suggestion: ${result.error}`);
+		return true;
+	}
+
+	private resolveAllSuggestionsIn(editor: Editor, action: "accept" | "reject"): void {
+		const view = editorView(editor);
+		if (!view) {
+			new Notice("Couldn't access the editor.");
+			return;
+		}
+		resolveAllSuggestions(view, action).match({
+			ok: () => new Notice(action === "accept" ? "All suggestions accepted" : "All suggestions rejected"),
+			err: (message) => new Notice(`Couldn't ${action} suggestions: ${message}`),
+		});
 	}
 
 	/** Reading view has no editor surface, so map the rendered selection back to

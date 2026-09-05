@@ -6,10 +6,13 @@ import { Card, CardCallbacks } from "../ui/card";
 import { cardSignature } from "../ui/card-format";
 import {
 	Change,
+	computeAcceptSuggestion,
 	computeAppendReply,
 	computeDeleteComment,
 	computeDeleteEntry,
 	computeEditEntry,
+	computeRejectSuggestion,
+	computeSetProposal,
 	computeSetResolved,
 	computeToggleReaction,
 } from "../editor/edits";
@@ -88,6 +91,9 @@ class ReadingMargin {
 			toggleReaction: ({ id, entry, emoji }) =>
 				void this.edit((doc) => computeToggleReaction({ doc, id, entry, emoji, author: deps.getAuthor() })),
 			openInSidebar: (id) => deps.openInSidebar?.(id),
+			acceptSuggestion: (id) => void this.edit((doc) => computeAcceptSuggestion(doc, id)),
+			rejectSuggestion: (id) => void this.edit((doc) => computeRejectSuggestion(doc, id)),
+			setProposal: (id, proposal) => void this.edit((doc) => computeSetProposal(doc, id, proposal)),
 		};
 
 		this.scroller.addEventListener("scroll", this.scrollHandler, { passive: true });

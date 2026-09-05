@@ -1,5 +1,5 @@
 import { Result } from "better-result";
-import { CommentData, ParsedComment, Reaction, ReactionTarget } from "../format/types";
+import { CommentData, ParsedComment, Reaction, ReactionTarget, TextRange } from "../format/types";
 import {
 	allBodyRanges,
 	anchorRange,
@@ -8,6 +8,7 @@ import {
 	isHighlight,
 	isInFencedCode,
 	isInside,
+	isSuggestion,
 	isUneditable,
 	malformedMessage,
 	maskedRanges,
@@ -291,7 +292,7 @@ const replaceBody = (
 };
 
 const toData = (c: ParsedComment): CommentData => {
-	return {
+	const data: CommentData = {
 		author: c.author,
 		createdAt: c.createdAt,
 		status: c.status,
@@ -300,6 +301,8 @@ const toData = (c: ParsedComment): CommentData => {
 		thread: c.thread,
 		reactions: c.reactions,
 	};
+	if (c.proposal !== undefined) data.proposal = c.proposal;
+	return data;
 };
 
 const toggleReactions = (reactions: Reaction[], entry: number, emoji: string, author: string): Reaction[] => {
@@ -377,6 +380,155 @@ export const computeDeleteComment = (doc: string, id: string): Result<Change[], 
 const scanAll = (doc: string, re: RegExp, fn: (from: number, to: number) => void): void => {
 	let m: RegExpExecArray | null;
 	while ((m = re.exec(doc))) fn(m.index, m.index + m[0].length);
+};
+
+// ── Suggestions ──────────────────────────────────────────────────────────────
+// A suggestion is a comment whose body carries a proposal for its anchored range.
+// The document keeps the pre-suggestion text, so every other renderer shows the
+// note unchanged; accepting applies the proposal, rejecting drops the suggestion.
+
+export type NewSuggestionInput = {
+	id: string;
+	createdAt: string;
+	author: string;
+	/** Text to replace the anchored range with. `""` proposes deleting the range;
+	 *  with an empty range (from === to) a non-empty proposal is an insertion. */
+	proposal: string;
+	/** Optional note explaining the suggestion; becomes the first thread entry. */
+	text?: string;
+	/** The selected text captured when composing; refused if the document shifted. */
+	expected?: string;
+};
+
+/** Wrap [from,to] (possibly empty) with anchor markers and append a body block that
+ *  holds the proposal. Refuses code, frontmatter, and ranges that touch another
+ *  suggestion's anchor — accepting one would rewrite the other's text. */
+export const computeAddSuggestion = (
+	doc: string,
+	from: number,
+	to: number,
+	input: NewSuggestionInput,
+): Result<Change[], string> => {
+	if (to < from) [from, to] = [to, from];
+	if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to > doc.length) {
+		return Result.err("The selection is outside the document.");
+	}
+	if (from === to && input.proposal === "") {
+		return Result.err("Type the text to insert, or select text to replace or delete.");
+	}
+	if (input.expected !== undefined && doc.slice(from, to) !== input.expected) {
+		return Result.err("The selection moved — try suggesting again.");
+	}
+	const frontmatter = frontmatterRange(doc);
+	if (frontmatter && from < frontmatter.to) {
+		return Result.err("Suggestions can't be anchored inside the note's frontmatter.");
+	}
+	if (isInFencedCode(doc, from) || (to > from && isInFencedCode(doc, to - 1))) {
+		return Result.err("Suggestions inside code blocks aren't supported yet — comment on the block instead.");
+	}
+	({ from, to } = expandInlineCodeSelection(doc, from, to));
+	const range = { from, to };
+	const clash = parseComments(doc)
+		.filter(isSuggestion)
+		.some((c) => {
+			const other = anchorRange(c);
+			return !!other && rangesConflict(range, other);
+		});
+	if (clash) return Result.err("That text already has a suggestion. Accept or reject it first.");
+
+	const data: CommentData = {
+		author: input.author,
+		createdAt: input.createdAt,
+		status: "open",
+		quote: doc.slice(from, to),
+		proposal: input.proposal,
+		thread: input.text ? [{ author: input.author, timestamp: input.createdAt, text: input.text }] : [],
+		reactions: [],
+	};
+	const paraEnd = blockEnd(doc, to);
+	const body = { from: paraEnd, to: paraEnd, insert: "\n" + serializeBody(input.id, data) };
+	if (from === to) {
+		// One change for both markers so their order can't depend on how the caller
+		// sorts same-position inserts.
+		return Result.ok([{ from, to: from, insert: openMarker(input.id) + closeMarker(input.id) }, body]);
+	}
+	return Result.ok([
+		{ from, to: from, insert: openMarker(input.id) },
+		{ from: to, to, insert: closeMarker(input.id) },
+		body,
+	]);
+};
+
+/** Two anchor ranges conflict when one contains part of the other. An empty range
+ *  (an insertion point) conflicts only when it sits strictly inside the other, or
+ *  when both are the same point. */
+const rangesConflict = (a: TextRange, b: TextRange): boolean => {
+	const aEmpty = a.from === a.to;
+	const bEmpty = b.from === b.to;
+	if (aEmpty && bEmpty) return a.from === b.from;
+	if (aEmpty) return b.from < a.from && a.from < b.to;
+	if (bEmpty) return a.from < b.from && b.from < a.to;
+	return a.from < b.to && b.from < a.to;
+};
+
+/** Replace the anchored range with the proposal and remove the suggestion. Other
+ *  comments anchored inside the replaced text lose their markers and become
+ *  orphans; their threads stay in the note. */
+export const computeAcceptSuggestion = (doc: string, id: string): Result<Change[], string> => {
+	const c = parseComments(doc).find((x) => x.id === id);
+	if (!c) return Result.err("Suggestion not found.");
+	if (!isSuggestion(c) || c.proposal === undefined) return Result.err("That comment is not a suggestion.");
+	if (isUneditable(c) && c.malformed) return Result.err(malformedMessage(c.malformed));
+	if (!c.open || !c.close || !isAnchored(c)) {
+		return Result.err("This suggestion's text is gone, so there is nothing to apply. Reject it to remove it.");
+	}
+	if (isCodeComment(c)) return Result.err("Suggestions on code blocks can't be applied yet.");
+	const changes: Change[] = [{ from: c.open.from, to: c.close.to, insert: c.proposal }];
+	for (const body of allBodyRanges(doc, id)) {
+		const leading = doc.charCodeAt(body.from - 1) === 10 ? (doc.charCodeAt(body.from - 2) === 13 ? 2 : 1) : 0;
+		changes.push({ from: body.from - leading, to: body.to, insert: "" });
+	}
+	changes.sort((a, b) => a.from - b.from);
+	return Result.ok(changes);
+};
+
+/** Drop the suggestion, leaving the text as it was. */
+export const computeRejectSuggestion = (doc: string, id: string): Result<Change[], string> => {
+	const c = parseComments(doc).find((x) => x.id === id);
+	if (!c) return Result.err("Suggestion not found.");
+	if (!isSuggestion(c)) return Result.err("That comment is not a suggestion.");
+	return computeDeleteComment(doc, id);
+};
+
+/** Change what the suggestion proposes. */
+export const computeSetProposal = (doc: string, id: string, proposal: string): Result<Change[], string> => {
+	return replaceBody(doc, id, (c) => (isSuggestion(c) ? { ...toData(c), proposal } : null)).mapError((e) =>
+		e === "That reply no longer exists." ? "That comment is not a suggestion." : e,
+	);
+};
+
+/** Accept or reject every applicable suggestion in one change set. Suggestions
+ *  whose changes would overlap are refused so they can be handled one at a time. */
+export const computeResolveAllSuggestions = (doc: string, action: "accept" | "reject"): Result<Change[], string> => {
+	const suggestions = parseComments(doc).filter((c) => isSuggestion(c) && !isUneditable(c));
+	const applicable =
+		action === "accept" ? suggestions.filter((c) => isAnchored(c) && !isCodeComment(c)) : suggestions;
+	if (applicable.length === 0) return Result.err("No suggestions to " + action + ".");
+	const all: Change[] = [];
+	for (const c of applicable) {
+		const result = action === "accept" ? computeAcceptSuggestion(doc, c.id) : computeRejectSuggestion(doc, c.id);
+		if (result.isErr()) return result;
+		all.push(...result.value);
+	}
+	all.sort((a, b) => a.from - b.from);
+	for (let i = 1; i < all.length; i++) {
+		const previous = all[i - 1];
+		const current = all[i];
+		if (previous && current && current.from < previous.to) {
+			return Result.err("Some suggestions overlap — accept or reject them one at a time.");
+		}
+	}
+	return Result.ok(all);
 };
 
 /** Apply changes (original coordinates, CM semantics) — the write path for every

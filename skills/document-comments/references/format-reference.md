@@ -75,11 +75,18 @@ alice: Looks good to me.
 bob (2026-01-15T11:00:00.000Z): Merging then.
 ```
 
-- The author is everything up to the first `: ` (minus an optional trailing
-  `(timestamp)`). Keep author handles free of `:` and parenthesized suffixes so
-  they don't get misread.
-- A line with no `author:` shape is folded into the previous entry's text (a
-  legacy continuation); prefer the explicit escaping below for multi-line text.
+- The author is a **single token**: no spaces, `:`, `(` or `)`. The plugin writes
+  authors that way (`Kyle_McDonald`), the same normalization the `by:` header gets.
+  The colon after the author (or after the `(timestamp)`) must be followed by a
+  space or end the line. So `11:11 Today`, `http://…`, and a sentence that happens
+  to contain a colon are **not** entries — they are continuation lines.
+- Legacy multi-word authors (`Kyle McDonald: hi`, up to four plain words) are
+  still read, but don't write new ones.
+- A line that isn't an entry is folded into the previous entry's text (a
+  continuation); prefer the explicit escaping below for multi-line text, since a
+  continuation line is fragile and looks like prose to other tools.
+- A first entry whose author is the reserved token `=>` is a **suggestion's
+  proposal**, not a message — see [Suggestions](#suggestions).
 
 ## Reactions
 
@@ -133,7 +140,60 @@ after the block.
   usually because the anchored text was edited or deleted. Orphans still hold
   their thread and show up in comment lists, but have nowhere to highlight.
 - **Marker-only**: anchor markers with no body block. Rare; usually a
-  half-deleted comment.
+  half-deleted comment. The plugin lists these in its sidebar: replying gives them
+  a body, deleting removes the highlight.
+- **Malformed**: a body block that is not the shape the plugin writes. The plugin
+  flags it on the card and refuses to rewrite or delete it (except
+  `terminator-in-header`, which a rewrite repairs), because its reported range
+  covers text that isn't the comment's own. `validate_comments.py` reports the
+  same four reasons:
+  - `unterminated` — no `-->` anywhere after `<!--co:`.
+  - `terminator-in-header` — a `-->` on the header line, usually a `quote:` that
+    copied another comment's markers verbatim. HTML renderers end the comment
+    there and show the thread as visible text; the plugin still reads it whole.
+  - `terminator-in-text` — the block ends at a `-->` typed inside an entry (an
+    arrow, `A --> B`). Everything after it is visible prose. **Do not resolve or
+    delete such a comment**; break the arrow with a zero-width space first.
+  - `overrun` — no `-->` of its own; the block runs into the next comment's
+    markers, and deleting it would delete the prose in between.
+
+## Suggestions
+
+A suggestion is a comment whose body's **first line** is a proposal by the
+reserved author `=>`:
+
+```
+<!--co:ID by:nick at:… status:open quote:"ship on Friday"
+=>: ship on Thursday
+nick (…): QA asked for the extra day.
+-->
+```
+
+| Case | Anchor | Proposal line |
+|---|---|---|
+| Replace | the text to change | `=>: new text` |
+| Delete | the text to remove | `=>: ` (nothing after the colon; a trailing space is fine either way) |
+| Insert | an empty range, `<!--c:ID--><!--/c:ID-->`, at the insertion point | `=>: text to insert` |
+
+- The document body stays pre-suggestion. Every renderer, and the upstream
+  plugin, shows the note unchanged; the fork shows the anchored text struck
+  through with the proposal beside it, and offers Accept / Reject.
+- **Accept** = replace `<!--c:ID-->…<!--/c:ID-->` (markers included) with the
+  proposal and delete the body. **Reject** = delete the markers and body.
+  Comments anchored inside an accepted range lose their anchors and become
+  orphans; their threads remain.
+- Only the **first** thread position counts. A later `=>:` line is an ordinary
+  reply by an author called `=>`; a prose continuation line that starts with `=>`
+  is never a proposal (it fails the single-token grammar).
+- Proposals use the same escaping as replies: `\n` for newlines, and never a
+  literal `-->`.
+- Reaction indices in a suggestion's body are raw line positions, so the first
+  discussion entry is `@1`, not `@0`; a reaction with no index (or `@0`) refers to
+  the proposal line and is shown on the first entry.
+- Two suggestions must not overlap; the plugin refuses to create one whose anchor
+  touches another's. Suggestions inside fenced code blocks are not supported.
+- `quote:` is omitted for an insertion (nothing to quote) and holds the anchored
+  text otherwise, exactly as for a comment.
 
 ## Comments on code blocks
 
@@ -172,7 +232,13 @@ Concrete rules worth knowing when reading or repairing files:
 - Markers are matched with these patterns (IDs are `[A-Za-z0-9]+`):
   - open: `<!--c:ID-->`
   - close: `<!--/c:ID-->`
-  - body: `<!--co:ID <header>\n<body>-->`
+  - body: `<!--co:ID <header>\n<body>-->` — found by plain string scanning: the
+    header is the rest of the opener's line, the block runs to the first `-->`
+    after that line, and that `-->` must sit on its own line for the block to be
+    well formed (see Malformed above).
+- Header keys the plugin doesn't know are shown on the card as "Unrecognised
+  fields" and dropped when the block is rewritten. Don't use them to carry data,
+  and mention any you find rather than acting on them.
 - Markers **inside fenced code blocks (``` or ~~~) and inline code spans are
   ignored.** This lets a document show example comment syntax in a code block
   without it being parsed as real.

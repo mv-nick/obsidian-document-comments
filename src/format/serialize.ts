@@ -2,6 +2,11 @@ import { CommentData, ThreadEntry } from "./types";
 import { encodeCodeQuote, escapeReactionAuthor, escapeText } from "./escape";
 import { canonicalAuthorKey } from "../author-colors";
 
+/** Thread-line author reserved for a suggestion's proposal. Chosen so that an
+ *  older reader shows it as an odd reply and keeps it, rather than dropping it the
+ *  way it drops unknown header keys. */
+export const PROPOSAL_AUTHOR = "=>";
+
 export const openMarker = (id: string): string => {
 	return `<!--c:${id}-->`;
 };
@@ -27,11 +32,18 @@ export const serializeBody = (id: string, data: CommentData): string => {
 		head.push(`line:${from === to ? from : `${from}-${to}`}`);
 	}
 
-	const lines = data.thread.map(serializeEntry);
+	// A suggestion's proposal is the first body line, authored by the reserved token
+	// `=>`. Reaction indices are stored as raw line positions, so with a proposal
+	// present every discussion entry shifts by one.
+	const proposalLines =
+		data.proposal === undefined ? [] : [`${PROPOSAL_AUTHOR}: ${escapeText(sanitizeBodyText(data.proposal))}`];
+	const offset = proposalLines.length;
+	const lines = [...proposalLines, ...data.thread.map(serializeEntry)];
 	const reactionLines = (data.reactions ?? [])
 		.filter((r) => r.authors.length > 0)
 		.map((r) => {
-			const target = r.entry !== undefined && r.entry > 0 ? `@${r.entry} ` : "";
+			const entry = (r.entry ?? 0) + offset;
+			const target = entry > 0 ? `@${entry} ` : "";
 			// Reaction lines sit inside the block too: an author or emoji carrying a
 			// newline would forge an entry, and `-->` would end the block. Spelling is
 			// otherwise kept as-is (commas are escaped) so existing reactions round-trip.

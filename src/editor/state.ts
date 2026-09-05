@@ -10,7 +10,7 @@ import {
 } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import { ParsedComment } from "../format/types";
-import { anchorRange, parseComments } from "../format/parse";
+import { anchorRange, isSuggestion, parseComments, suggestionKind } from "../format/parse";
 import { isCodeComment, resolveCodeAnchor } from "../format/code-anchor";
 import { commentPreview } from "../format/preview";
 import { authorColorCss, creatorForComment } from "../author-colors";
@@ -49,6 +49,38 @@ class SpaceWidget extends WidgetType {
 }
 
 const HIDE_AS_SPACE = Decoration.replace({ widget: new SpaceWidget() });
+
+/** A suggestion's proposed text, shown inline right after the text it would
+ *  replace (or at the insertion point). Not part of the document: accepting the
+ *  suggestion is what writes it. */
+class ProposalWidget extends WidgetType {
+	constructor(
+		private readonly id: string,
+		private readonly text: string,
+		private readonly color: string,
+	) {
+		super();
+	}
+
+	eq(other: ProposalWidget): boolean {
+		return other.id === this.id && other.text === this.text && other.color === this.color;
+	}
+
+	toDOM(view: EditorView): HTMLElement {
+		const span = view.dom.createSpan({
+			cls: "dc-proposal",
+			text: this.text,
+			attr: { "data-cid": this.id, "data-dc-proposal": "true" },
+		});
+		span.style.setProperty("--dc-highlight-color", this.color);
+		span.remove();
+		return span;
+	}
+
+	ignoreEvent(): boolean {
+		return false;
+	}
+}
 
 class MarkerWidget extends WidgetType {
 	eq(): boolean {
@@ -281,15 +313,17 @@ const compute = (state: EditorState): CommentFieldValue => {
 		// A code comment highlights the resolved target lines inside the block, not
 		// the whole between-markers range (which would include the fences).
 		const r = code ? resolveCodeAnchor(text, c) : anchorRange(c);
+		const author = creatorForComment(c) ?? config.author();
+		const color = (config.highlightColorForAuthor ?? config.colorForAuthor)(author);
 		if (r && r.to > r.from) {
 			// A mark decoration paints over live source text, so it shows in Source
 			// mode and (via the Reading-view post-processor) in Reading view. It does
 			// NOT show where Obsidian replaces the source with a widget — most notably
 			// a Live-Preview table (.cm-table-widget, a self-contained nested editor):
 			// the underlying text is hidden, so the highlight can't render there.
-			const cls = c.status === "resolved" ? "doc-comment-span is-resolved" : "doc-comment-span";
-			const author = creatorForComment(c) ?? config.author();
-			const color = (config.highlightColorForAuthor ?? config.colorForAuthor)(author);
+			let cls = c.status === "resolved" ? "doc-comment-span is-resolved" : "doc-comment-span";
+			// Suggested text reads as struck through: the proposal follows it inline.
+			if (isSuggestion(c) && !code) cls += " is-suggestion";
 			const attributes: Record<string, string> = {
 				"data-cid": c.id,
 				"data-dc-author": author,
@@ -298,6 +332,16 @@ const compute = (state: EditorState): CommentFieldValue => {
 			const preview = commentPreview(c);
 			if (preview) attributes.title = preview;
 			decoRanges.push(Decoration.mark({ class: cls, attributes }).range(r.from, r.to));
+		}
+		// The proposal sits right after the anchored text (before the hidden closing
+		// marker), or at the insertion point for an insertion.
+		if (r && !code && c.proposal && suggestionKind(c) !== "delete") {
+			decoRanges.push(
+				Decoration.widget({
+					widget: new ProposalWidget(c.id, c.proposal, authorColorCss(color)),
+					side: -1,
+				}).range(r.to),
+			);
 		}
 	}
 

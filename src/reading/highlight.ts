@@ -1,6 +1,6 @@
 import type { MarkdownPostProcessorContext } from "obsidian";
 import { ParsedComment } from "../format/types";
-import { anchorRange, fencedRanges, isHighlight, parseComments } from "../format/parse";
+import { anchorRange, fencedRanges, isHighlight, isSuggestion, parseComments, suggestionKind } from "../format/parse";
 import { isCodeComment, resolveCodeAnchor } from "../format/code-anchor";
 import { commentPreview } from "../format/preview";
 import {
@@ -170,13 +170,34 @@ export const highlightPostProcessor = (
 		const quote = text.slice(range.from, range.to);
 		if (!quote.trim()) continue;
 		const preview = commentPreview(c);
+		const suggestion = isSuggestion(c);
 		const codeText = inlineCodeText(quote);
-		if (codeText !== null) {
-			const code = inlineCodeElement(el, sectionSource, range.from - sectionFrom, codeText);
-			if (code) wrapFirstMatch(code, codeText, c.id, c.status === "resolved", preview, author, color);
-			continue;
+		const span =
+			codeText !== null
+				? (() => {
+						const code = inlineCodeElement(el, sectionSource, range.from - sectionFrom, codeText);
+						return code
+							? wrapFirstMatch(
+									code,
+									codeText,
+									c.id,
+									c.status === "resolved",
+									preview,
+									author,
+									color,
+									suggestion,
+								)
+							: null;
+					})()
+				: wrapFirstMatch(el, quote, c.id, c.status === "resolved", preview, author, color, suggestion);
+		// A suggestion's proposal follows the struck-through text inline. (An
+		// insertion has no anchored text to find in the rendered DOM; its card shows it.)
+		if (span && c.proposal && suggestionKind(c) !== "delete") {
+			const proposal = el.createSpan({ cls: "dc-proposal", text: c.proposal, attr: { "data-cid": c.id } });
+			proposal.detach();
+			if (color !== undefined) proposal.style.setProperty("--dc-highlight-color", authorColorCss(color));
+			span.after(proposal);
 		}
-		wrapFirstMatch(el, quote, c.id, c.status === "resolved", preview, author, color);
 	}
 };
 
@@ -397,7 +418,8 @@ const wrapFirstMatch = (
 	title: string | null,
 	author: string,
 	color: ResolvedAuthorColor | undefined,
-): boolean => {
+	suggestion = false,
+): HTMLElement | null => {
 	const doc = root.ownerDocument;
 	const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 	let node = walker.nextNode() as Text | null;
@@ -407,9 +429,9 @@ const wrapFirstMatch = (
 			const range = doc.createRange();
 			range.setStart(node, idx);
 			range.setEnd(node, idx + needle.length);
-			const span = root.createSpan({
-				cls: resolved ? "doc-comment-span is-resolved" : "doc-comment-span",
-			});
+			let cls = resolved ? "doc-comment-span is-resolved" : "doc-comment-span";
+			if (suggestion) cls += " is-suggestion";
+			const span = root.createSpan({ cls });
 			span.detach();
 			span.setAttribute("data-cid", id);
 			span.setAttribute("data-dc-author", author);
@@ -417,14 +439,14 @@ const wrapFirstMatch = (
 			if (title) span.setAttribute("title", title);
 			try {
 				range.surroundContents(span);
-				return true;
+				return span;
 			} catch {
-				return false; // range crossed element boundaries — skip gracefully
+				return null; // range crossed element boundaries — skip gracefully
 			}
 		}
 		node = walker.nextNode() as Text | null;
 	}
-	return false;
+	return null;
 };
 
 const isInsideHighlight = (node: Node): boolean => {

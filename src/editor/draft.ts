@@ -2,9 +2,12 @@ import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 import type { TextRange } from "../format/types";
 
+export type DraftMode = "comment" | "suggest";
+
 /** A pending comment range. A target id keeps an existing empty comment stable
- *  if another pane or Sync changes it before submission. */
-export type Draft = TextRange & { targetHighlightId?: string };
+ *  if another pane or Sync changes it before submission. A `suggest` draft may be
+ *  empty (an insertion point). */
+export type Draft = TextRange & { targetHighlightId?: string; mode?: DraftMode };
 
 export const setDraft = StateEffect.define<Draft>();
 export const clearDraft = StateEffect.define<null>();
@@ -15,7 +18,8 @@ export const clearDraft = StateEffect.define<null>();
 // its temporal dead zone and throws, nulling the decoration provider.
 const draftDecorations = (draft: Draft | null): DecorationSet => {
 	if (!draft || draft.to <= draft.from) return Decoration.none;
-	return Decoration.set([Decoration.mark({ class: "doc-comment-span dc-draft" }).range(draft.from, draft.to)]);
+	const cls = draft.mode === "suggest" ? "doc-comment-span dc-draft dc-draft-suggest" : "doc-comment-span dc-draft";
+	return Decoration.set([Decoration.mark({ class: cls }).range(draft.from, draft.to)]);
 };
 
 /**
@@ -33,7 +37,10 @@ export const draftField = StateField.define<Draft | null>({
 		if (value && tr.docChanged) {
 			const from = tr.changes.mapPos(value.from, 1);
 			const to = tr.changes.mapPos(value.to, -1);
-			return to > from ? { ...value, from, to } : null;
+			// An insertion draft is a point and stays one; a range draft dies when its
+			// text is deleted from under it.
+			const wasPoint = value.from === value.to;
+			return to > from || (wasPoint && to === from) ? { ...value, from, to } : null;
 		}
 		return value;
 	},

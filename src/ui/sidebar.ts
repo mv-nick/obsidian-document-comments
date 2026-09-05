@@ -3,15 +3,18 @@ import { EditorView } from "@codemirror/view";
 import { Result } from "better-result";
 import type { AuthorColorResolver } from "../author-colors";
 import { ParsedComment } from "../format/types";
-import { anchorRange, hasCommentCard, isMarkerOnly, parseComments } from "../format/parse";
+import { anchorRange, hasCommentCard, isMarkerOnly, isSuggestion, parseComments } from "../format/parse";
 import { Card, CardCallbacks } from "./card";
 import { cardSignature } from "./card-format";
 import {
 	Change,
+	computeAcceptSuggestion,
 	computeAppendReply,
 	computeDeleteComment,
 	computeDeleteEntry,
 	computeEditEntry,
+	computeRejectSuggestion,
+	computeSetProposal,
 	computeSetResolved,
 	computeToggleReaction,
 } from "../editor/edits";
@@ -29,13 +32,16 @@ export type SidebarDeps = {
 };
 
 /** Panel-local status filter — independent of the document's resolved setting. */
-type FilterMode = "open" | "resolved" | "all";
+type FilterMode = "open" | "suggestions" | "resolved" | "all";
 
 const FILTERS: ReadonlyArray<{ mode: FilterMode; label: string }> = [
 	{ mode: "open", label: "Open" },
+	{ mode: "suggestions", label: "Suggestions" },
 	{ mode: "resolved", label: "Resolved" },
 	{ mode: "all", label: "All" },
 ];
+
+const NO_COUNTS: Record<FilterMode, number> = { open: 0, suggestions: 0, resolved: 0, all: 0 };
 
 /**
  * The "All discussions" panel: a dedicated side view listing the active note's
@@ -84,6 +90,9 @@ export class CommentsSidebarView extends ItemView {
 			deleteEntry: (id, index) => void this.edit((doc) => computeDeleteEntry(doc, id, index)),
 			toggleReaction: ({ id, entry, emoji }) =>
 				void this.edit((doc) => computeToggleReaction({ doc, id, entry, emoji, author: deps.getAuthor() })),
+			acceptSuggestion: (id) => void this.edit((doc) => computeAcceptSuggestion(doc, id)),
+			rejectSuggestion: (id) => void this.edit((doc) => computeRejectSuggestion(doc, id)),
+			setProposal: (id, proposal) => void this.edit((doc) => computeSetProposal(doc, id, proposal)),
 		};
 	}
 
@@ -183,7 +192,7 @@ export class CommentsSidebarView extends ItemView {
 		if (!file) {
 			this.renderComments([]);
 			this.titleEl.setText("Comments");
-			this.paintTabs({ open: 0, resolved: 0, all: 0 });
+			this.paintTabs(NO_COUNTS);
 			this.setEmpty("Open a note to see its comments.");
 			return;
 		}
@@ -194,7 +203,7 @@ export class CommentsSidebarView extends ItemView {
 		} catch {
 			this.renderComments([]);
 			this.titleEl.setText(file.basename);
-			this.paintTabs({ open: 0, resolved: 0, all: 0 });
+			this.paintTabs(NO_COUNTS);
 			this.setEmpty("Couldn't read this note.");
 			return;
 		}
@@ -206,11 +215,24 @@ export class CommentsSidebarView extends ItemView {
 			(c) => hasCommentCard(c) || isMarkerOnly(c) || c.malformed !== undefined,
 		);
 		const open = all.filter((c) => c.status !== "resolved");
+		const suggestions = all.filter(isSuggestion);
 		const resolved = all.filter((c) => c.status === "resolved");
-		const shown = this.filter === "open" ? open : this.filter === "resolved" ? resolved : all;
+		const shown =
+			this.filter === "open"
+				? open
+				: this.filter === "suggestions"
+					? suggestions
+					: this.filter === "resolved"
+						? resolved
+						: all;
 
 		this.titleEl.setText(file.basename);
-		this.paintTabs({ open: open.length, resolved: resolved.length, all: all.length });
+		this.paintTabs({
+			open: open.length,
+			suggestions: suggestions.length,
+			resolved: resolved.length,
+			all: all.length,
+		});
 		this.renderComments(shown);
 		this.setEmpty(this.emptyMessage(all.length, shown.length));
 	}
@@ -219,6 +241,7 @@ export class CommentsSidebarView extends ItemView {
 		if (shown > 0) return null;
 		if (total === 0) return "No comments in this note yet.";
 		if (this.filter === "open") return "No open comments.";
+		if (this.filter === "suggestions") return "No suggestions.";
 		if (this.filter === "resolved") return "No resolved comments.";
 		return "Nothing to show.";
 	}

@@ -2,7 +2,7 @@ import { App, Component, MarkdownRenderer, Menu, setIcon } from "obsidian";
 import type { Result } from "better-result";
 import type { AuthorColorResolver } from "../author-colors";
 import { ParsedComment, ReactionTarget } from "../format/types";
-import { malformedMessage } from "../format/parse";
+import { isSuggestion, malformedMessage, suggestionKind } from "../format/parse";
 import { CardEntry, cardEntries, cardSignature, formatRelativeTime } from "./card-format";
 
 const QUICK_EMOJI = ["👍", "❤️", "😄", "🎉", "😮", "👀", "🙏"];
@@ -33,6 +33,11 @@ export type CardCallbacks = {
 	/** Reveal this thread in the comments sidebar — the escape for a card too tall to
 	 *  fit the margin even when expanded. Absent for cards already in the sidebar. */
 	openInSidebar?: (id: string) => void;
+	/** Suggestion actions. Accept writes the proposal into the note; reject drops
+	 *  the suggestion; setProposal changes what it proposes. */
+	acceptSuggestion?: (id: string) => void;
+	rejectSuggestion?: (id: string) => void;
+	setProposal?: (id: string, proposal: string) => void;
 };
 
 /** Per-view context a card needs to render comment text as Markdown. */
@@ -57,6 +62,9 @@ export class Card {
 	/** In-progress text of the entry editor, so an external update mid-edit
 	 *  (a synced reply, a reaction toggled elsewhere) doesn't discard it. */
 	private editDraft = "";
+	/** Inline editor for a suggestion's proposal. */
+	private editingProposal = false;
+	private proposalDraft = "";
 	private draft = "";
 	private savingFirstEntry = false;
 	private savingReply = false;
@@ -87,7 +95,9 @@ export class Card {
 			const target = e.target as HTMLElement;
 			if (target.closest("button, textarea, a, .dc-foot-btn, .dc-reaction, .dc-pop")) return;
 			this.cb.onClickAnchor(this.id);
-			if (this.comment.thread.length === 0) {
+			// An empty plain comment opens straight into its text editor; an empty
+			// suggestion has its proposal as content, so it opens like any thread.
+			if (this.comment.thread.length === 0 && !isSuggestion(this.comment)) {
 				this.startEdit(0);
 				return;
 			}
@@ -208,6 +218,7 @@ export class Card {
 		// collapsed; the footer (Show more / Open in sidebar) sits outside the clip.
 		const clip = this.el.createDiv("dc-card-clip");
 		this.clipEl = clip;
+		if (isSuggestion(c)) this.renderSuggestion(clip);
 		const thread = clip.createDiv("dc-thread");
 		this.threadEl = thread;
 		cardEntries(c).forEach((entry, i) => this.renderEntry(thread, entry, i));
@@ -292,7 +303,8 @@ export class Card {
 
 		const bar = row.createDiv("dc-entry__bar");
 		this.iconButton(bar, "smile-plus", "React", (e) => this.openReactionPicker(e.currentTarget as HTMLElement, i));
-		if (i === 0) {
+		// A suggestion is accepted or rejected rather than resolved.
+		if (i === 0 && !isSuggestion(this.comment)) {
 			const resolved = this.comment.status === "resolved";
 			this.iconButton(bar, resolved ? "rotate-ccw" : "check", resolved ? "Reopen" : "Resolve", () =>
 				this.cb.setResolved(this.id, !resolved),
@@ -497,19 +509,128 @@ export class Card {
 
 	private openMoreMenu(e: MouseEvent, index: number): void {
 		const menu = new Menu();
+		const suggestion = isSuggestion(this.comment);
 		menu.addItem((item) =>
 			item
 				.setTitle("Edit")
 				.setIcon("pencil")
 				.onClick(() => this.startEdit(index)),
 		);
+		if (index === 0 && suggestion && this.cb.setProposal) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Edit suggestion")
+					.setIcon("pencil-line")
+					.onClick(() => this.startProposalEdit()),
+			);
+		}
 		menu.addItem((item) =>
 			item
-				.setTitle(index === 0 ? "Delete comment" : "Delete reply")
+				.setTitle(index === 0 ? (suggestion ? "Delete suggestion" : "Delete comment") : "Delete reply")
 				.setIcon("trash")
 				.onClick(() => (index === 0 ? this.cb.remove(this.id) : this.cb.deleteEntry(this.id, index))),
 		);
 		menu.showAtMouseEvent(e);
+	}
+
+	/** The suggestion block at the top of the card: who proposes what, the proposal
+	 *  itself (editable), and Accept / Reject. */
+	private renderSuggestion(parent: HTMLElement): void {
+		const c = this.comment;
+		const kind = suggestionKind(c);
+		const box = parent.createDiv("dc-suggest");
+		const who = c.author || "";
+		const verb =
+			kind === "insert"
+				? "suggests inserting"
+				: kind === "delete"
+					? "suggests deleting"
+					: kind === "replace"
+						? "suggests replacing with"
+						: "suggested a change, but the text is gone";
+		box.createDiv({ cls: "dc-suggest__label", text: who ? `${who} ${verb}` : verb });
+		if (this.editingProposal) {
+			this.renderProposalEditor(box);
+		} else {
+			const shown = kind === "delete" ? (c.quote ?? "") : (c.proposal ?? "");
+			const proposal = box.createDiv({
+				cls: kind === "delete" ? "dc-suggest__proposal is-delete" : "dc-suggest__proposal",
+				text: shown || "(nothing)",
+			});
+			if (this.cb.setProposal) {
+				proposal.setAttribute("title", "Double-click to edit the suggestion");
+				proposal.addEventListener("dblclick", (event) => {
+					event.stopPropagation();
+					this.startProposalEdit();
+				});
+			}
+		}
+		const actions = box.createDiv("dc-suggest__actions");
+		if (kind && this.cb.acceptSuggestion) {
+			const accept = actions.createEl("button", { cls: "dc-suggest__btn is-accept", text: "Accept" });
+			accept.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.cb.acceptSuggestion?.(this.id);
+			});
+		}
+		if (this.cb.rejectSuggestion) {
+			const reject = actions.createEl("button", {
+				cls: "dc-suggest__btn is-reject",
+				text: kind ? "Reject" : "Remove",
+			});
+			reject.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.cb.rejectSuggestion?.(this.id);
+			});
+		}
+		if (actions.childElementCount === 0) actions.remove();
+	}
+
+	private renderProposalEditor(parent: HTMLElement): void {
+		const box = parent.createDiv("dc-field dc-field--edit dc-field--proposal");
+		const ta = box.createEl("textarea", { cls: "dc-field__input" });
+		ta.value = this.proposalDraft;
+		autogrow(ta);
+		ta.addEventListener("input", () => {
+			this.proposalDraft = ta.value;
+			autogrow(ta);
+		});
+		ta.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") this.cancelProposalEdit();
+			else if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				this.commitProposalEdit(ta.value);
+			}
+		});
+		const actions = box.createDiv("dc-field__actions");
+		this.roundButton(actions, "x", "Cancel", "dc-round--cancel", () => this.cancelProposalEdit());
+		this.roundButton(actions, "check", "Save", "dc-round--confirm", () => this.commitProposalEdit(ta.value));
+		window.setTimeout(() => {
+			ta.focus();
+			ta.setSelectionRange(ta.value.length, ta.value.length);
+		}, 0);
+	}
+
+	private startProposalEdit(): void {
+		this.editingProposal = true;
+		this.proposalDraft = this.comment.proposal ?? "";
+		this.render();
+		this.cb.onResize();
+	}
+
+	private commitProposalEdit(value: string): void {
+		this.editingProposal = false;
+		this.proposalDraft = "";
+		this.render();
+		this.cb.onResize();
+		if (value !== this.comment.proposal) this.cb.setProposal?.(this.id, value);
+	}
+
+	private cancelProposalEdit(): void {
+		this.editingProposal = false;
+		this.proposalDraft = "";
+		this.render();
+		this.cb.onResize();
 	}
 
 	private openReactionPicker(anchor: HTMLElement, entry: number): void {

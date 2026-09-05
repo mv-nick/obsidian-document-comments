@@ -145,6 +145,48 @@ Our roadmap commits us to <!--c:q4m2-->net zero by 2030<!--/c:q4m2--> across all
 
 The plugin highlights the selected text and shows an editable **Empty** card.
 
+## Suggesting an edit instead of making it
+
+A **suggestion** is a comment that proposes replacement text for its anchored
+range. The document keeps the original text, so nothing changes until the note's
+owner accepts it in the plugin (or an agent is told to apply it). Use suggestions
+whenever you would otherwise edit someone's prose: they get to see the change in
+place, with a strikethrough and the proposed text beside it, and accept or reject
+it with one click.
+
+The proposal is the **first body line**, authored by the reserved token `=>`. The
+discussion thread, if any, follows it:
+
+```markdown
+We should <!--c:k3f9-->ship on Friday<!--/c:k3f9--> regardless of the timeline.
+<!--co:k3f9 by:agent at:2026-01-15T14:30:00.000Z status:open quote:"ship on Friday"
+=>: ship on Thursday
+agent (2026-01-15T14:30:00.000Z): QA asked for the extra day.
+-->
+```
+
+- **Replace**: anchor the text to change; `=>: new text`.
+- **Delete**: anchor the text to remove; `=>: ` with nothing after the colon.
+- **Insert**: anchor an empty range — `<!--c:ID--><!--/c:ID-->` at the insertion
+  point — and `=>: text to insert`. Omit `quote:` (there is nothing to quote).
+- Multi-line proposals use the same `\n` escaping as replies. Never put a literal
+  `-->` in a proposal; break it with a zero-width space.
+- Don't nest suggestions: a second suggestion whose anchor overlaps an existing
+  one is refused by the plugin, because accepting either would rewrite the other's
+  text. A plain comment on suggested text is fine.
+- Only the first `=>:` line is a proposal. Later lines by `=>` are ordinary
+  replies, so never sign a reply as `=>`.
+
+To **accept** a suggestion by hand: replace everything from `<!--c:ID-->` through
+`<!--/c:ID-->` (markers included) with the proposal text, then delete the body
+block. To **reject**: delete the markers and the body, leaving the text as it was.
+Do either only when the user asked you to apply or discard suggestions; reading
+and summarising them needs no such permission.
+
+Readers on the older upstream plugin see the proposal as an odd first reply by
+"=>" and keep it when they reply or resolve, so a suggestion survives a round trip
+through a collaborator's vault.
+
 ## Replying, resolving, and deleting
 
 These all edit the **body block**; the anchor markers stay put.
