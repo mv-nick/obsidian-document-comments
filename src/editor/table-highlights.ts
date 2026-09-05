@@ -32,7 +32,7 @@ const namesByDocument = new WeakMap<Document, Set<string>>();
 const stylesByDocument = new WeakMap<Document, HTMLStyleElement>();
 
 export const tableHighlightName = (color: ResolvedAuthorColor, resolved: boolean): string => {
-	return `document-comments-table-${resolved ? "resolved" : "open"}-${color ? color.slice(1) : "default"}`;
+	return `document-comments-mv-table-${resolved ? "resolved" : "open"}-${color ? color.slice(1) : "default"}`;
 };
 
 export const tableHighlightRule = (color: ResolvedAuthorColor, resolved: boolean): string => {

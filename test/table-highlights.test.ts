@@ -51,10 +51,10 @@ describe("tableHighlightTargets", () => {
 	});
 
 	test("uses separate stable registry names for each color and state", () => {
-		expect(tableHighlightName("#0090ff", false)).toBe("document-comments-table-open-0090ff");
-		expect(tableHighlightName("#0090ff", true)).toBe("document-comments-table-resolved-0090ff");
+		expect(tableHighlightName("#0090ff", false)).toBe("document-comments-mv-table-open-0090ff");
+		expect(tableHighlightName("#0090ff", true)).toBe("document-comments-mv-table-resolved-0090ff");
 		expect(tableHighlightName("#e54d2e", false)).not.toBe(tableHighlightName("#0090ff", false));
-		expect(tableHighlightName(null, false)).toBe("document-comments-table-open-default");
+		expect(tableHighlightName(null, false)).toBe("document-comments-mv-table-open-default");
 	});
 
 	test("renders open and resolved table colors with distinct treatments", () => {

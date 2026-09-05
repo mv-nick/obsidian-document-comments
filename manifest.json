@@ -1,9 +1,9 @@
 {
-	"id": "document-comments",
-	"name": "Document Comments",
+	"id": "document-comments-mv",
+	"name": "Document Comments MV",
 	"version": "0.1.15",
 	"minAppVersion": "1.7.2",
-	"description": "Notion-style margin comments stored inline in your markdown, so agents and other tools can read them too.",
-	"author": "Kyle McDonald",
+	"description": "Fork of Kyle McDonald's Document Comments, adding suggestions. Notion-style margin comments stored inline in your markdown, so agents and other tools can read them too.",
+	"author": "Kyle McDonald (upstream), Nick / Macroscopic (fork)",
 	"isDesktopOnly": false
 }

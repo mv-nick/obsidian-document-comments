@@ -20,7 +20,7 @@ import { spanSelector } from "../util/css";
 import { CARD_FLASH_MS, FLASH_MS } from "../ui/constants";
 import { centeredScrollTop } from "./scroll";
 
-export const COMMENTS_VIEW_TYPE = "document-comments-sidebar";
+export const COMMENTS_VIEW_TYPE = "document-comments-mv-sidebar";
 
 export type SidebarDeps = {
 	app: App;

@@ -1,10 +1,10 @@
-# Document Comments
+# Document Comments MV
+
+> **This is a fork** of [Kyle McDonald's Document Comments](https://github.com/kylemcd/obsidian-document-comments) (MIT), maintained by Nick at Macroscopic for our own vaults. It keeps the same on-disk comment format and is where **suggestions** (proposed edits you accept or reject in the margin) are being added. The plugin id is `document-comments-mv` so Obsidian's community updater never overwrites it with the upstream release; do not run both plugins on the same vault at once. It is not in the community directory: install with BRAT or manually (below). Contributing back upstream is not a goal of this fork.
 
 Document Comments adds inline comments to Obsidian notes. It shows each comment as a card beside the text on desktop.
 
 The plugin stores each comment inside its Markdown file as an HTML comment. Other editors, version control tools, and agents can read the comment.
-
-[Install Document Comments from the Obsidian community plugin directory](https://community.obsidian.md/plugins/document-comments).
 
 ![Document Comments with threaded comment cards beside an Obsidian note](screenshot.png)
 
@@ -56,51 +56,36 @@ We should <!--c:h7k2-->ship on Friday<!--/c:h7k2--> regardless of the QA timelin
 
 ## Install
 
-Document Comments requires Obsidian 1.7.2 or newer. It supports desktop and mobile.
+Document Comments MV requires Obsidian 1.7.2 or newer. It supports desktop and mobile. It is not listed in the community plugin directory.
 
-### Community plugins
-
-Use the [Document Comments plugin page](https://community.obsidian.md/plugins/document-comments), or install it from Obsidian:
-
-1. Open **Settings → Community plugins**.
-2. Select **Browse**.
-3. Search for **Document Comments**.
-4. Select **Install**.
-5. Select **Enable**.
+If you have the upstream **Document Comments** plugin enabled, disable it first: both plugins render the same markers and would double up.
 
 ### BRAT
 
-Use BRAT to install a pre-release build:
+1. Install and enable **BRAT** from Community plugins.
+2. Run **BRAT: Add a beta plugin for testing**.
+3. Enter `mv-nick/obsidian-document-comments`.
+4. Enable **Document Comments MV** in Community plugins.
 
-1. Install **BRAT** from Community plugins.
-2. Enable **BRAT**.
-3. Run **BRAT: Add a beta plugin for testing**.
-4. Enter `kylemcd/obsidian-document-comments`.
-5. Enable **Document Comments** in Community plugins.
-
-BRAT installs the latest GitHub release and checks for updates.
+BRAT installs the latest GitHub release of this fork and checks for updates.
 
 ### Manual install
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/kylemcd/obsidian-document-comments/releases).
-2. Copy the files to `<your-vault>/.obsidian/plugins/document-comments/`.
-3. Restart or reload Obsidian.
-4. Enable **Document Comments** in Community plugins.
-
-Create the `document-comments` directory if it does not exist.
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/mv-nick/obsidian-document-comments/releases).
+2. Copy the files to `<your-vault>/.obsidian/plugins/document-comments-mv/`.
+3. To keep your settings from the upstream plugin, copy its `data.json` into the same folder.
+4. Restart or reload Obsidian, then enable **Document Comments MV** in Community plugins.
 
 ### Build from source
 
 ```bash
-git clone https://github.com/kylemcd/obsidian-document-comments
+git clone https://github.com/mv-nick/obsidian-document-comments
 cd obsidian-document-comments
-npm install
+npm ci --ignore-scripts
 npm run build
 ```
 
-Copy or link `main.js`, `manifest.json`, and `styles.css` to `<your-vault>/.obsidian/plugins/document-comments/`.
-
-Then enable **Document Comments** in Community plugins.
+Copy or link `main.js`, `manifest.json`, and `styles.css` to `<your-vault>/.obsidian/plugins/document-comments-mv/`, then enable **Document Comments MV** in Community plugins.
 
 ## Use the plugin
 
@@ -215,7 +200,7 @@ The plugin does not use the network, telemetry, or accounts. It stores all comme
 
 ## Roadmap
 
-Use the [Document Comments project](https://github.com/users/kylemcd/projects/1) to see the roadmap, current work, and planned work.
+Upstream's roadmap is the [Document Comments project](https://github.com/users/kylemcd/projects/1). This fork's plan is tracked separately by its maintainer; the headline item is suggestions.
 
 ## Known limitations
 
@@ -256,7 +241,7 @@ The [release workflow](.github/workflows/release.yml) builds the plugin and publ
 Verify a downloaded file with this command:
 
 ```bash
-gh attestation verify main.js --repo kylemcd/obsidian-document-comments
+gh attestation verify main.js --repo mv-nick/obsidian-document-comments
 ```
 
 ## License

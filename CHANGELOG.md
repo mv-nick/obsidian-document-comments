@@ -5,6 +5,8 @@ matching the pushed tag as that GitHub release's notes, so add an entry here bef
 
 ## Unreleased
 
+- Forked from `kylemcd/obsidian-document-comments` at 0.1.15 as **Document Comments MV** (`mv-nick/obsidian-document-comments`). Renamed the plugin id to `document-comments-mv`, the sidebar view type, and the table-highlight registry names so the fork can neither be overwritten by nor collide with the upstream plugin. The comment format is unchanged.
+
 ## 0.1.15
 
 - Fixed emoji reactions added to a reply being attached to the first comment in the thread. Reply reactions now remain with the thread entry where they were added, while existing reaction data remains compatible.

@@ -1,7 +1,7 @@
 {
-	"name": "document-comments",
+	"name": "document-comments-mv",
 	"version": "0.1.15",
-	"description": "Notion-style margin comments for Obsidian, stored inline in markdown.",
+	"description": "Fork of Kyle McDonald's Document Comments, adding suggestions. Notion-style margin comments for Obsidian, stored inline in markdown.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -18,7 +18,7 @@
 	"keywords": [
 		"obsidian-plugin"
 	],
-	"author": "Kyle McDonald",
+	"author": "Kyle McDonald (upstream), Nick / Macroscopic (fork)",
 	"license": "MIT",
 	"devDependencies": {
 		"@codemirror/state": "^6.7.1",
