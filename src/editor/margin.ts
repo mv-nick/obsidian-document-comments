@@ -24,6 +24,7 @@ import {
 } from "./commands";
 import { closestSpanId, spanSelector } from "../util/css";
 import { stackTops } from "../ui/stack";
+import { revealDelta } from "../ui/scroll";
 import { CARD_GAP, FLASH_MS } from "../ui/constants";
 import { buildDraftComposer } from "../ui/draft-composer";
 import { EmptySubmitAction } from "../ui/draft-behavior";
@@ -52,6 +53,14 @@ class MarginView implements PluginValue {
 	private animFrames = 0;
 	private animatingLoop = false;
 	private destroyed = false;
+	/** Last pointer position seen over the content, and the position at which we
+	 *  last scrolled the editor to reveal a card (see pointerStale). */
+	private pointer: { x: number; y: number } | null = null;
+	private scrolledFor: { x: number; y: number } | null = null;
+	/** The card the stack pivots around: the last one hovered or clicked. It stays
+	 *  beside its text with the others pushed out of the way, and keeps that place
+	 *  after the pointer leaves the text so it can be reached without it jumping. */
+	private pivotId: string | null = null;
 
 	constructor(private view: EditorView) {
 		this.container = view.dom.createDiv("doc-comment-margin");
@@ -239,7 +248,9 @@ class MarginView implements PluginValue {
 
 		if (draft && this.draftEl) place(this.draftEl, draft.from);
 
-		const tops = stackTops(placements, CARD_GAP);
+		const pivotEl = this.pivotId ? this.cards.get(this.pivotId)?.el : undefined;
+		const pivot = pivotEl ? placements.findIndex((p) => p.el === pivotEl) : -1;
+		const tops = stackTops(placements, CARD_GAP, pivot >= 0 ? pivot : undefined);
 		placements.forEach((p, i) => p.el.setCssStyles({ top: `${tops[i]}px` }));
 	}
 
@@ -334,6 +345,12 @@ class MarginView implements PluginValue {
 	}
 
 	private setActive(id: string | null): void {
+		if (id && id !== this.pivotId) {
+			this.pivotId = id;
+			// Re-stack around the new pivot now (not in the next measure) so a reveal
+			// that follows measures the card where it will actually be.
+			this.reposition();
+		}
 		if (this.activeId === id) return;
 		if (this.activeId) {
 			this.cards.get(this.activeId)?.setActive(false);
@@ -382,17 +399,61 @@ class MarginView implements PluginValue {
 		});
 	}
 
+	/** Hovering highlighted text whose card is clipped by the column or pushed off
+	 *  the visible area scrolls the editor the minimum needed to show the whole
+	 *  card — keeping the hovered text on screen when both fit. */
+	private revealCard(id: string): void {
+		const card = this.cards.get(id);
+		if (!card || card.el.offsetHeight === 0) return;
+		this.view.requestMeasure({
+			read: () => {
+				const comment = this.comments().find((c) => c.id === id);
+				const range = comment
+					? isCodeComment(comment)
+						? resolveCodeAnchor(this.view.state.doc.toString(), comment)
+						: anchorRange(comment)
+					: null;
+				const anchor = range ? this.view.coordsAtPos(range.from) : null;
+				return revealDelta(
+					card.el.getBoundingClientRect(),
+					this.view.scrollDOM.getBoundingClientRect(),
+					anchor,
+				);
+			},
+			write: (delta) => {
+				if (!delta) return;
+				this.scrolledFor = this.pointer;
+				this.view.scrollDOM.scrollBy({ top: delta, behavior: "smooth" });
+			},
+		});
+	}
+
+	/** After we scroll to reveal a card, the browser re-dispatches hover events for
+	 *  whatever content now sits under the unmoved pointer. Treat those as stale until
+	 *  the pointer actually moves, so a reveal can neither undo itself nor cascade
+	 *  into revealing the next comment. */
+	private pointerStale(e: MouseEvent): boolean {
+		if (this.scrolledFor && e.clientX === this.scrolledFor.x && e.clientY === this.scrolledFor.y) return true;
+		this.scrolledFor = null;
+		this.pointer = { x: e.clientX, y: e.clientY };
+		return false;
+	}
+
 	private onContentMouseDown = (e: MouseEvent): void => {
 		const id = closestSpanId(e.target);
 		if (id) this.setActive(id);
 	};
 
 	private onContentMouseOver = (e: MouseEvent): void => {
+		if (this.pointerStale(e)) return;
 		const id = closestSpanId(e.target);
-		if (id) this.setActive(id);
+		if (!id) return;
+		this.setActive(id);
+		this.revealCard(id);
 	};
 
 	private onContentMouseOut = (e: MouseEvent): void => {
+		if (this.pointerStale(e)) return;
 		const span = e.target instanceof Element ? e.target.closest(".doc-comment-span") : null;
 		if (!span) return;
 		// Ignore moves that stay within the same highlight element (avoids flicker).

@@ -19,6 +19,7 @@ import {
 import { applyCommentEdit, insertComment as routeInsertComment } from "../editor/routing";
 import { closestSpanId, spanSelector } from "../util/css";
 import { stackTops } from "../ui/stack";
+import { revealDelta } from "../ui/scroll";
 import { CARD_GAP, FLASH_MS } from "../ui/constants";
 import { buildDraftComposer } from "../ui/draft-composer";
 import { EmptySubmitAction } from "../ui/draft-behavior";
@@ -61,6 +62,13 @@ class ReadingMargin {
 	private animFrames = 0;
 	private animatingLoop = false;
 	private destroyed = false;
+	/** Last pointer position over the view, and the position at which we last
+	 *  scrolled to reveal a card (see pointerStale). */
+	private pointer: { x: number; y: number } | null = null;
+	private scrolledFor: { x: number; y: number } | null = null;
+	/** The card the stack pivots around: the last one hovered or clicked (see the
+	 *  editor margin for the rationale). */
+	private pivotId: string | null = null;
 
 	constructor(
 		private readingView: HTMLElement,
@@ -223,7 +231,9 @@ class ReadingMargin {
 				height: this.draftEl.offsetHeight,
 			});
 		}
-		const tops = stackTops(placements, CARD_GAP);
+		const pivotEl = this.pivotId ? this.cards.get(this.pivotId)?.el : undefined;
+		const pivot = pivotEl ? placements.findIndex((p) => p.el === pivotEl) : -1;
+		const tops = stackTops(placements, CARD_GAP, pivot >= 0 ? pivot : undefined);
 		placements.forEach((p, i) => p.el.setCssStyles({ top: `${tops[i]}px` }));
 	}
 
@@ -332,6 +342,10 @@ class ReadingMargin {
 	}
 
 	private setActive(id: string | null): void {
+		if (id && id !== this.pivotId) {
+			this.pivotId = id;
+			this.position();
+		}
 		if (this.activeId === id) return;
 		if (this.activeId) {
 			this.cards.get(this.activeId)?.setActive(false);
@@ -391,12 +405,42 @@ class ReadingMargin {
 		window.requestAnimationFrame(tick);
 	}
 
+	/** Hovering highlighted text whose card is clipped or pushed off the visible area
+	 *  scrolls the reading view the minimum needed to show the whole card, keeping
+	 *  the hovered text on screen when both fit. */
+	private revealCard(id: string): void {
+		const card = this.cards.get(id);
+		if (!card || card.el.offsetHeight === 0) return;
+		const span = this.scroller.querySelector(spanSelector(id));
+		const delta = revealDelta(
+			card.el.getBoundingClientRect(),
+			this.scroller.getBoundingClientRect(),
+			span ? span.getBoundingClientRect() : null,
+		);
+		if (!delta) return;
+		this.scrolledFor = this.pointer;
+		this.scroller.scrollBy({ top: delta, behavior: "smooth" });
+	}
+
+	/** Hover events re-dispatched by our own scroll (the pointer hasn't moved) are
+	 *  ignored, so a reveal can't undo itself or cascade to the next comment. */
+	private pointerStale(e: MouseEvent): boolean {
+		if (this.scrolledFor && e.clientX === this.scrolledFor.x && e.clientY === this.scrolledFor.y) return true;
+		this.scrolledFor = null;
+		this.pointer = { x: e.clientX, y: e.clientY };
+		return false;
+	}
+
 	private onMouseOver = (e: MouseEvent): void => {
+		if (this.pointerStale(e)) return;
 		const id = closestSpanId(e.target);
-		if (id) this.setActive(id);
+		if (!id) return;
+		this.setActive(id);
+		this.revealCard(id);
 	};
 
 	private onMouseOut = (e: MouseEvent): void => {
+		if (this.pointerStale(e)) return;
 		const span = e.target instanceof Element ? e.target.closest(".doc-comment-span") : null;
 		if (!span) return;
 		const to = e.relatedTarget;
