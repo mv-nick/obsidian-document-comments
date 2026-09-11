@@ -1,5 +1,12 @@
 export type Box = { top: number; bottom: number };
 
+/** True when `box` lies entirely inside `viewport` (with `pad` px of tolerance at
+ *  each edge). The check that gates every automatic re-stack or scroll: a card the
+ *  reader can already see is never moved. */
+export const isFullyVisible = (box: Box, viewport: Box, pad = 0): boolean => {
+	return box.top >= viewport.top - pad && box.bottom <= viewport.bottom + pad;
+};
+
 /**
  * How far to scroll (positive = down) so that `card` sits fully inside `viewport`
  * with `pad` px to spare, moving as little as possible. When `anchor` (the hovered

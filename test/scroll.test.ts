@@ -1,8 +1,28 @@
 import { describe, expect, test } from "vitest";
-import { centeredScrollTop, revealDelta } from "../src/ui/scroll";
+import { centeredScrollTop, isFullyVisible, revealDelta } from "../src/ui/scroll";
 
 // Viewport spans 100..500. Boxes are {top, bottom} in the same coordinates.
 const VIEW = { top: 100, bottom: 500 };
+
+describe("isFullyVisible", () => {
+	test("a card inside the viewport, touching its edges, is visible", () => {
+		expect(isFullyVisible({ top: 100, bottom: 500 }, VIEW)).toBe(true);
+		expect(isFullyVisible({ top: 200, bottom: 300 }, VIEW)).toBe(true);
+	});
+
+	test("a card clipped at either edge is not", () => {
+		expect(isFullyVisible({ top: 90, bottom: 200 }, VIEW)).toBe(false);
+		expect(isFullyVisible({ top: 400, bottom: 501 }, VIEW)).toBe(false);
+	});
+
+	test("a card entirely off screen is not", () => {
+		expect(isFullyVisible({ top: 600, bottom: 700 }, VIEW)).toBe(false);
+	});
+
+	test("tolerance forgives sub-pixel overhang", () => {
+		expect(isFullyVisible({ top: 99.5, bottom: 500.4 }, VIEW, 1)).toBe(true);
+	});
+});
 
 describe("revealDelta", () => {
 	test("does nothing for a card already fully visible", () => {

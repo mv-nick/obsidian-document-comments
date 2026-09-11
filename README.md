@@ -168,7 +168,7 @@ The Reading view command cannot add comments to embedded content.
 
 ### Manage a comment
 
-Select a card to open its reply field. Hover over an entry to show its reaction, resolve, edit, and delete controls. Hovering highlighted text in the note brings its card beside the text, moving the other cards out of the way, and scrolls the note if the card still doesn't fit; the card stays put until you hover another comment.
+Select a card to open its reply field. Hover over an entry to show its reaction, resolve, edit, and delete controls. Hovering highlighted text whose card is out of view brings the card beside the text, moving the other cards out of the way, and scrolls the note if it still doesn't fit; a card that is already visible never moves, and hovering cards in the column only highlights them.
 
 Use the **Open comments sidebar** command or ribbon icon to show all comments in the active note.
 

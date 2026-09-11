@@ -19,7 +19,7 @@ import {
 import { applyCommentEdit, insertComment as routeInsertComment } from "../editor/routing";
 import { closestSpanId, spanSelector } from "../util/css";
 import { stackTops } from "../ui/stack";
-import { revealDelta } from "../ui/scroll";
+import { isFullyVisible, revealDelta } from "../ui/scroll";
 import { CARD_GAP, FLASH_MS } from "../ui/constants";
 import { buildDraftComposer } from "../ui/draft-composer";
 import { EmptySubmitAction } from "../ui/draft-behavior";
@@ -341,11 +341,8 @@ class ReadingMargin {
 		this.position();
 	}
 
+	/** Pure highlighting: hovering a card in the column never moves the column. */
 	private setActive(id: string | null): void {
-		if (id && id !== this.pivotId) {
-			this.pivotId = id;
-			this.position();
-		}
 		if (this.activeId === id) return;
 		if (this.activeId) {
 			this.cards.get(this.activeId)?.setActive(false);
@@ -405,16 +402,24 @@ class ReadingMargin {
 		window.requestAnimationFrame(tick);
 	}
 
-	/** Hovering highlighted text whose card is clipped or pushed off the visible area
-	 *  scrolls the reading view the minimum needed to show the whole card, keeping
-	 *  the hovered text on screen when both fit. */
-	private revealCard(id: string): void {
+	/** Called only from a hover on the highlighted TEXT. A card already fully visible
+	 *  is left alone. Otherwise it becomes the stack's pivot (beside its text, others
+	 *  make room), and if it still doesn't fit the reading view scrolls the minimum
+	 *  needed to show the whole card, keeping the hovered text on screen when both fit. */
+	private ensureCardVisible(id: string): void {
 		const card = this.cards.get(id);
 		if (!card || card.el.offsetHeight === 0) return;
+		const viewport = this.scroller.getBoundingClientRect();
+		if (isFullyVisible(card.el.getBoundingClientRect(), viewport, 1)) return;
+		if (this.pivotId !== id) {
+			this.pivotId = id;
+			this.position();
+			if (isFullyVisible(card.el.getBoundingClientRect(), viewport, 1)) return;
+		}
 		const span = this.scroller.querySelector(spanSelector(id));
 		const delta = revealDelta(
 			card.el.getBoundingClientRect(),
-			this.scroller.getBoundingClientRect(),
+			viewport,
 			span ? span.getBoundingClientRect() : null,
 		);
 		if (!delta) return;
@@ -436,7 +441,7 @@ class ReadingMargin {
 		const id = closestSpanId(e.target);
 		if (!id) return;
 		this.setActive(id);
-		this.revealCard(id);
+		this.ensureCardVisible(id);
 	};
 
 	private onMouseOut = (e: MouseEvent): void => {

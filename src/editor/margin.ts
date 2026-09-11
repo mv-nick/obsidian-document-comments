@@ -24,7 +24,7 @@ import {
 } from "./commands";
 import { closestSpanId, spanSelector } from "../util/css";
 import { stackTops } from "../ui/stack";
-import { revealDelta } from "../ui/scroll";
+import { isFullyVisible, revealDelta } from "../ui/scroll";
 import { CARD_GAP, FLASH_MS } from "../ui/constants";
 import { buildDraftComposer } from "../ui/draft-composer";
 import { EmptySubmitAction } from "../ui/draft-behavior";
@@ -57,9 +57,10 @@ class MarginView implements PluginValue {
 	 *  last scrolled the editor to reveal a card (see pointerStale). */
 	private pointer: { x: number; y: number } | null = null;
 	private scrolledFor: { x: number; y: number } | null = null;
-	/** The card the stack pivots around: the last one hovered or clicked. It stays
-	 *  beside its text with the others pushed out of the way, and keeps that place
-	 *  after the pointer leaves the text so it can be reached without it jumping. */
+	/** The card the stack pivots around: the last one whose text was hovered while
+	 *  the card was out of view. It stays beside its text with the others pushed out
+	 *  of the way, and keeps that place until another out-of-view card is hovered, so
+	 *  it can be reached without jumping. Hovering cards in the column never sets it. */
 	private pivotId: string | null = null;
 
 	constructor(private view: EditorView) {
@@ -344,13 +345,9 @@ class MarginView implements PluginValue {
 		return this.view.state.facet(commentConfig).allowEmptyComments() ? "highlight" : "none";
 	}
 
+	/** Highlight a card and its text together. Pure highlighting: hovering a card
+	 *  in the column must never move the column (see ensureCardVisible). */
 	private setActive(id: string | null): void {
-		if (id && id !== this.pivotId) {
-			this.pivotId = id;
-			// Re-stack around the new pivot now (not in the next measure) so a reveal
-			// that follows measures the card where it will actually be.
-			this.reposition();
-		}
 		if (this.activeId === id) return;
 		if (this.activeId) {
 			this.cards.get(this.activeId)?.setActive(false);
@@ -399,33 +396,32 @@ class MarginView implements PluginValue {
 		});
 	}
 
-	/** Hovering highlighted text whose card is clipped by the column or pushed off
-	 *  the visible area scrolls the editor the minimum needed to show the whole
-	 *  card — keeping the hovered text on screen when both fit. */
-	private revealCard(id: string): void {
+	/** Called only from a hover on the highlighted TEXT. A card already fully inside
+	 *  the visible area is left alone — nothing moves. Otherwise the card becomes
+	 *  the pivot of the stack so it sits beside its text (other cards make room),
+	 *  and if it still doesn't fit, the editor scrolls the minimum needed to show
+	 *  the whole card, keeping the hovered text on screen when both fit. */
+	private ensureCardVisible(id: string): void {
 		const card = this.cards.get(id);
 		if (!card || card.el.offsetHeight === 0) return;
-		this.view.requestMeasure({
-			read: () => {
-				const comment = this.comments().find((c) => c.id === id);
-				const range = comment
-					? isCodeComment(comment)
-						? resolveCodeAnchor(this.view.state.doc.toString(), comment)
-						: anchorRange(comment)
-					: null;
-				const anchor = range ? this.view.coordsAtPos(range.from) : null;
-				return revealDelta(
-					card.el.getBoundingClientRect(),
-					this.view.scrollDOM.getBoundingClientRect(),
-					anchor,
-				);
-			},
-			write: (delta) => {
-				if (!delta) return;
-				this.scrolledFor = this.pointer;
-				this.view.scrollDOM.scrollBy({ top: delta, behavior: "smooth" });
-			},
-		});
+		const viewport = this.view.scrollDOM.getBoundingClientRect();
+		if (isFullyVisible(card.el.getBoundingClientRect(), viewport, 1)) return;
+		if (this.pivotId !== id) {
+			this.pivotId = id;
+			this.reposition();
+			if (isFullyVisible(card.el.getBoundingClientRect(), viewport, 1)) return;
+		}
+		const comment = this.comments().find((c) => c.id === id);
+		const range = comment
+			? isCodeComment(comment)
+				? resolveCodeAnchor(this.view.state.doc.toString(), comment)
+				: anchorRange(comment)
+			: null;
+		const anchor = range ? this.view.coordsAtPos(range.from) : null;
+		const delta = revealDelta(card.el.getBoundingClientRect(), viewport, anchor);
+		if (!delta) return;
+		this.scrolledFor = this.pointer;
+		this.view.scrollDOM.scrollBy({ top: delta, behavior: "smooth" });
 	}
 
 	/** After we scroll to reveal a card, the browser re-dispatches hover events for
@@ -449,7 +445,7 @@ class MarginView implements PluginValue {
 		const id = closestSpanId(e.target);
 		if (!id) return;
 		this.setActive(id);
-		this.revealCard(id);
+		this.ensureCardVisible(id);
 	};
 
 	private onContentMouseOut = (e: MouseEvent): void => {
